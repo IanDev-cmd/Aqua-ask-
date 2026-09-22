@@ -1,0 +1,32 @@
+# AquaAsk — Render Blueprint
+# Live URL: https://aqua-ask.onrender.com
+# Repo:     https://github.com/IanDev-cmd/Aqua-ask-
+#
+# After first deploy, set these in the Render dashboard (they are not in git):
+#   GOOGLE_API_KEY, XAI_API_KEY
+
+services:
+  - type: web
+    name: aqua-ask
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: PUBLIC_APP_URL
+        value: https://aqua-ask.onrender.com
+      - key: GITHUB_REPO_URL
+        value: https://github.com/IanDev-cmd/Aqua-ask-
+      - key: XAI_MODEL
+        value: grok-3
+      - key: GOOGLE_CHAT_MODEL
+        value: gemini-2.5-flash-lite
+      - key: GOOGLE_EMBED_MODEL
+        value: models/gemini-embedding-001
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
