@@ -1345,7 +1345,7 @@
     fetch(API_BASE + "/api/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: q, force_web_search: true }),
+      body: JSON.stringify({ query: q, force_web_search: aiOn }),
       signal: ctrl.signal
     }).then(function(res){
       if(!res.ok) throw new Error("search failed");

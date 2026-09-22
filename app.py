@@ -85,6 +85,16 @@ WELCOME = (
 _GREETINGS = {
     "hi", "hey", "hello", "yo", "sup", "thanks", "thank", "ok", "okay", "hola",
 }
+_NOISE_MARKERS = (
+    "google scholar",
+    "download references",
+    "download reference",
+    "accessed ",
+    "skip to the content",
+    "cookie",
+    "author information",
+    "affiliations national",
+)
 SYSTEM_PROMPT = """You are AquaAsk, an elite, scientific conversational AI engine built explicitly for the OneAquaHealth Global Hackathon. Your primary purpose is to translate complex urban river datasets into clear, actionable "One Health" insights for citizens and policymakers.
 
 ### CORE OPERATIONAL INSTRUCTIONS:
@@ -275,6 +285,15 @@ YOUTUBE_RE = re.compile(
     r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})"
 )
 URL_RE = re.compile(r"^https?://", re.I)
+
+
+def _looks_like_citation_dump(text: str) -> bool:
+    low = (text or "").lower()
+    if not low.strip():
+        return True
+    marker_hits = sum(1 for tok in _NOISE_MARKERS if tok in low)
+    doi_hits = low.count("doi.org") + low.count("https://doi")
+    return marker_hits >= 2 or doi_hits >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -496,9 +515,11 @@ class DataIngestionManager:
             for tag in soup(["script", "style", "nav", "header", "noscript", "footer"]):
                 tag.decompose()
             title = (soup.title.string.strip() if soup.title and soup.title.string else url)
-            text = " ".join(soup.get_text(separator=" ").split())
+            text = " ".join(soup.get_text(separator=" ").split())[:1600]
             if not text:
                 raise ValueError(f"No extractable text at URL: {url}")
+            if _looks_like_citation_dump(text):
+                raise ValueError(f"No usable prose at URL: {url}")
             return [
                 ParsedDoc(
                     text=text,
@@ -925,16 +946,24 @@ class AquaAskEngine:
             lex_chunks = self._lexical_lookup(query)
             lex_score = self._best_lexical_score(query, lex_chunks)
             strong = lex_score >= FAST_LEXICAL_MIN
-            web_future = self._pool.submit(self._fast_web_search, query)
+            need_web = bool(force_web_search) or not strong
+            web_future = self._pool.submit(self._fast_web_search, query) if need_web else None
             vec_future = None
             if not strong:
                 vec_future = self._pool.submit(self._vector_lookup, query)
 
-            web_docs: list[ParsedDoc] = self._relevant_facts(query)
-            try:
-                web_docs.extend(web_future.result(timeout=WEB_TIMEOUT_SEC) or [])
-            except Exception:
-                LOGGER.warning("Fast web search missed the %ss window", WEB_TIMEOUT_SEC)
+            web_docs: list[ParsedDoc] = [
+                doc for doc in self._relevant_facts(query) if not _looks_like_citation_dump(doc.text)
+            ]
+            if web_future is not None:
+                try:
+                    web_docs.extend(
+                        doc
+                        for doc in (web_future.result(timeout=WEB_TIMEOUT_SEC) or [])
+                        if not _looks_like_citation_dump(doc.text)
+                    )
+                except Exception:
+                    LOGGER.warning("Fast web search missed the %ss window", WEB_TIMEOUT_SEC)
 
             chunks = lex_chunks
             if vec_future is not None:
@@ -1292,6 +1321,8 @@ class AquaAskEngine:
         for chunk in chunks:
             origin = str(chunk.metadata.get("source_origin") or "knowledge-base")
             section = str(chunk.metadata.get("section") or "")
+            if _looks_like_citation_dump(chunk.text):
+                continue
             cite = _cite_label(chunk.metadata, origin, section)
             key = f"{cite}|{chunk.text[:80]}"
             if key in seen:
@@ -1312,6 +1343,8 @@ class AquaAskEngine:
             )
 
         for doc in web_docs:
+            if _looks_like_citation_dump(doc.text):
+                continue
             cite = _cite_label(
                 {"publication_title": doc.publication_title or doc.section, "doi": doc.doi or doc.source_origin},
                 doc.source_origin,
@@ -1370,10 +1403,15 @@ class AquaAskEngine:
             return snippet.rsplit(" ", 1)[0] + "…"
 
         scored: list[tuple[float, SourceMetadata]] = []
+        fact_titles = {str(item["title"]).lower() for item in PROJECT_FACTS}
         for src in sources:
-            score = self._score_text(
-                f"{src.publication_title or ''} {src.excerpt or ''}", terms
-            )
+            blob = f"{src.publication_title or ''} {src.excerpt or ''}"
+            if _looks_like_citation_dump(blob):
+                continue
+            score = self._score_text(blob, terms)
+            title = (src.publication_title or "").lower()
+            if title in fact_titles or title == "oneaquahealth project website":
+                score += 24
             if score > 0:
                 scored.append((score, src))
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -1528,12 +1566,8 @@ def _seed_oneaquahealth_job() -> None:
             LOGGER.info("OneAquaHealth seed complete: %s", result)
         ENGINE._ensure_memory_index()
         try:
-            site_docs = ENGINE._ingest._parse_url("https://oneaquahealth.eu")
-            for doc in site_docs:
-                doc.publication_title = "OneAquaHealth project website"
-                doc.doi = "https://oneaquahealth.eu"
-            ENGINE._project_docs = site_docs
-            LOGGER.info("Cached OneAquaHealth.eu brief (%s chars)", sum(len(d.text) for d in site_docs))
+            ENGINE._project_docs = []
+            LOGGER.info("Using curated project facts (site scrape skipped)")
         except Exception:
             LOGGER.warning("Could not cache oneaquahealth.eu brief")
         try:
