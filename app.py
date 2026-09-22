@@ -54,7 +54,7 @@ TOP_K = 8
 DISTANCE_THRESHOLD = 0.45
 WEB_TIMEOUT_SEC = 1.1
 HTTP_TIMEOUT_SEC = 8.0
-LLM_TIMEOUT_SEC = 6.0
+LLM_TIMEOUT_SEC = 12.0
 VECTOR_BUDGET_SEC = 2.6
 FAST_LEXICAL_MIN = 8
 CHUNK_TOKENS = 500
@@ -77,6 +77,14 @@ USER_AGENT = (
 INSUFFICIENT = (
     "I do not have sufficient information in my knowledge base to answer this."
 )
+WELCOME = (
+    "Hello — I am AquaAsk. Ask about the OneAquaHealth project, urban stream health, "
+    "the five European pilot cities (Coimbra, Toulouse, Ghent, Benevento, Oslo), "
+    "or the publications in this knowledge base."
+)
+_GREETINGS = {
+    "hi", "hey", "hello", "yo", "sup", "thanks", "thank", "ok", "okay", "hola",
+}
 SYSTEM_PROMPT = """You are AquaAsk, an elite, scientific conversational AI engine built explicitly for the OneAquaHealth Global Hackathon. Your primary purpose is to translate complex urban river datasets into clear, actionable "One Health" insights for citizens and policymakers.
 
 ### CORE OPERATIONAL INSTRUCTIONS:
@@ -906,6 +914,8 @@ class AquaAskEngine:
         query = (query or "").strip()
         if not query:
             return {"answer": INSUFFICIENT, "sources": []}
+        if self._is_smalltalk(query):
+            return {"answer": WELCOME, "sources": []}
         cache_key = query.lower()
         cached = self._cache.get(cache_key)
         if cached:
@@ -920,8 +930,7 @@ class AquaAskEngine:
             if not strong:
                 vec_future = self._pool.submit(self._vector_lookup, query)
 
-            web_docs: list[ParsedDoc] = list(self._fact_docs)
-            web_docs.extend(self._project_docs or [])
+            web_docs: list[ParsedDoc] = self._relevant_facts(query)
             try:
                 web_docs.extend(web_future.result(timeout=WEB_TIMEOUT_SEC) or [])
             except Exception:
@@ -954,6 +963,25 @@ class AquaAskEngine:
         except Exception:
             LOGGER.exception("handle_search failed")
             return {"answer": INSUFFICIENT, "sources": []}
+
+    def _is_smalltalk(self, query: str) -> bool:
+        raw = (query or "").strip().lower()
+        if not raw:
+            return True
+        if raw.strip(" !.?") in _GREETINGS:
+            return True
+        words = [w for w in re.findall(r"[a-z]+", raw) if w not in _STOPWORDS]
+        return bool(words) and len(words) <= 3 and all(w in _GREETINGS for w in words)
+
+    def _relevant_facts(self, query: str) -> list[ParsedDoc]:
+        terms = self._terms(query)
+        ranked: list[tuple[float, ParsedDoc]] = []
+        for doc in list(self._fact_docs) + list(self._project_docs or []):
+            score = self._score_text(f"{doc.publication_title} {doc.text}", terms)
+            if score > 0:
+                ranked.append((score, doc))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [doc for _, doc in ranked[:4]]
 
     def _terms(self, query: str) -> list[str]:
         found = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}", query)]
@@ -1014,8 +1042,23 @@ class AquaAskEngine:
         terms = self._terms(query)
         if not terms:
             return []
+        corpus: list[RetrievedChunk] = list(self._memory_chunks)
+        for doc in list(self._fact_docs) + list(self._project_docs or []):
+            corpus.append(
+                RetrievedChunk(
+                    text=doc.text,
+                    metadata={
+                        "source_type": doc.source_type,
+                        "source_origin": doc.source_origin,
+                        "section": doc.section,
+                        "publication_title": doc.publication_title or doc.section,
+                        "doi": doc.doi or "",
+                    },
+                    distance=0.08,
+                )
+            )
         ranked: list[tuple[float, RetrievedChunk]] = []
-        for chunk in self._memory_chunks:
+        for chunk in corpus:
             blob = f"{chunk.metadata.get('publication_title', '')} {chunk.text}"
             score = self._score_text(blob, terms)
             if score <= 0:
@@ -1326,14 +1369,16 @@ class AquaAskEngine:
                     snippet = snippet[dotted + 2 :]
             return snippet.rsplit(" ", 1)[0] + "…"
 
-        ranked = sorted(
-            sources,
-            key=lambda src: -self._score_text(
+        scored: list[tuple[float, SourceMetadata]] = []
+        for src in sources:
+            score = self._score_text(
                 f"{src.publication_title or ''} {src.excerpt or ''}", terms
-            ),
-        )
+            )
+            if score > 0:
+                scored.append((score, src))
+        scored.sort(key=lambda item: item[0], reverse=True)
         bits: list[str] = []
-        for src in ranked[:1]:
+        for _, src in scored[:2]:
             excerpt = window(src.excerpt or "")
             if len(excerpt) < 40:
                 continue
