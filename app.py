@@ -49,6 +49,7 @@ logging.basicConfig(
 
 ROOT = Path(__file__).resolve().parent
 CHROMA_DIR = Path(os.getenv("CHROMA_DIR", ROOT / "chroma_db"))
+PORTABLE_CORPUS = ROOT / "chroma_export.json.gz"
 COLLECTION_NAME = "aquaask_kb"
 TOP_K = 8
 DISTANCE_THRESHOLD = 0.45
@@ -931,6 +932,34 @@ class AquaAskEngine:
         LOGGER.info("Upserted %s chunks", len(texts))
         return True
 
+    def load_portable_corpus(self) -> int:
+        if not PORTABLE_CORPUS.is_file():
+            return 0
+        import gzip
+        import json
+
+        with gzip.open(PORTABLE_CORPUS, "rt", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        ids = list(payload.get("ids") or [])
+        documents = list(payload.get("documents") or [])
+        metadatas = list(payload.get("metadatas") or [])
+        embeddings = list(payload.get("embeddings") or [])
+        if not ids or not documents or not embeddings:
+            return 0
+        if not (len(ids) == len(documents) == len(embeddings)):
+            LOGGER.warning("Portable corpus length mismatch")
+            return 0
+        if len(metadatas) != len(ids):
+            metadatas = [{} for _ in ids]
+        self.collection().upsert(
+            ids=ids,
+            documents=documents,
+            embeddings=embeddings,
+            metadatas=metadatas,
+        )
+        LOGGER.info("Loaded portable corpus (%s chunks) from %s", len(ids), PORTABLE_CORPUS.name)
+        return len(ids)
+
     def search(self, query: str, force_web_search: bool = False) -> dict[str, Any]:
         query = (query or "").strip()
         if not query:
@@ -1562,8 +1591,12 @@ def _seed_oneaquahealth_job() -> None:
         count = ENGINE.collection().count()
         LOGGER.info("Chroma corpus size: %s chunks", count)
         if count == 0:
-            result = ENGINE.ingest_oneaquahealth()
-            LOGGER.info("OneAquaHealth seed complete: %s", result)
+            loaded = ENGINE.load_portable_corpus()
+            if loaded:
+                LOGGER.info("OneAquaHealth portable corpus ready: %s chunks", loaded)
+            else:
+                result = ENGINE.ingest_oneaquahealth()
+                LOGGER.info("OneAquaHealth seed complete: %s", result)
         ENGINE._ensure_memory_index()
         try:
             ENGINE._project_docs = []

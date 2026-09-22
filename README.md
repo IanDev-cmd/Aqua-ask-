@@ -17,7 +17,7 @@ Open http://127.0.0.1:8001
 
 ## Render
 
-`render.yaml` deploys the FastAPI app as **aqua-ask**. In the Render dashboard set `GOOGLE_API_KEY` and `XAI_API_KEY` (never commit `.env`).
+On Render, startup loads `chroma_export.json.gz` (174 portable chunks + embeddings). The live `chroma_db/` folder is local-only — Windows HNSW binaries are not copied to Linux.
 
 If the service was created from GitHub (not Blueprint), set **Start Command** to:
 
