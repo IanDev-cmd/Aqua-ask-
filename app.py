@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ TOP_K = 8
 DISTANCE_THRESHOLD = 0.45
 WEB_TIMEOUT_SEC = 1.1
 HTTP_TIMEOUT_SEC = 8.0
-LLM_TIMEOUT_SEC = 12.0
+LLM_TIMEOUT_SEC = 20.0
 VECTOR_BUDGET_SEC = 2.6
 FAST_LEXICAL_MIN = 8
 CHUNK_TOKENS = 500
@@ -856,9 +856,13 @@ class AquaAskEngine:
     def collection(self) -> Any:
         if self._collection is None:
             import chromadb
+            from chromadb.config import Settings
 
             CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-            client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+            client = chromadb.PersistentClient(
+                path=str(CHROMA_DIR),
+                settings=Settings(anonymized_telemetry=False),
+            )
             self._collection = client.get_or_create_collection(
                 name=COLLECTION_NAME,
                 metadata={"hnsw:space": "cosine"},
@@ -960,12 +964,30 @@ class AquaAskEngine:
         LOGGER.info("Loaded portable corpus (%s chunks) from %s", len(ids), PORTABLE_CORPUS.name)
         return len(ids)
 
+    def ensure_ready(self) -> int:
+        """Build or open a native Chroma index before the first search."""
+        try:
+            count = int(self.collection().count() or 0)
+        except Exception:
+            LOGGER.exception("Chroma open failed")
+            count = 0
+        if count == 0:
+            count = self.load_portable_corpus()
+            LOGGER.info("RAG corpus loaded: %s chunks", count)
+        if not self._memory_chunks:
+            self._ensure_memory_index()
+        try:
+            return int(self.collection().count() or count)
+        except Exception:
+            return count
+
     def search(self, query: str, force_web_search: bool = False) -> dict[str, Any]:
         query = (query or "").strip()
         if not query:
             return {"answer": INSUFFICIENT, "sources": []}
         if self._is_smalltalk(query):
             return {"answer": WELCOME, "sources": []}
+        self.ensure_ready()
         cache_key = query.lower()
         cached = self._cache.get(cache_key)
         if cached:
@@ -1586,53 +1608,45 @@ def _ingest_job(source: str) -> None:
     LOGGER.info("Background ingest %s for %s", "ok" if ok else "failed", source[:160])
 
 
+def _warmup_llms() -> None:
+    try:
+        ENGINE.gemini_client().models.generate_content(
+            model=GEMINI_CHAT_MODEL.replace("models/", ""),
+            contents="OK",
+        )
+        LOGGER.info("Gemini generation warmup complete")
+    except Exception:
+        LOGGER.warning("Gemini generation warmup skipped")
+    try:
+        key = os.getenv("XAI_API_KEY") or ""
+        if key.startswith("xai-"):
+            probe = requests.post(
+                "https://api.x.ai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=4.0,
+            )
+            if probe.status_code in {401, 403}:
+                ENGINE._grok_disabled = True
+                LOGGER.warning("Grok disabled for this process (HTTP %s)", probe.status_code)
+    except Exception:
+        LOGGER.warning("Grok warmup probe skipped")
+
+
 def _seed_oneaquahealth_job() -> None:
     try:
-        count = ENGINE.collection().count()
-        LOGGER.info("Chroma corpus size: %s chunks", count)
-        if count == 0:
-            loaded = ENGINE.load_portable_corpus()
-            if loaded:
-                LOGGER.info("OneAquaHealth portable corpus ready: %s chunks", loaded)
-            else:
-                result = ENGINE.ingest_oneaquahealth()
-                LOGGER.info("OneAquaHealth seed complete: %s", result)
-        ENGINE._ensure_memory_index()
-        try:
-            ENGINE._project_docs = []
-            LOGGER.info("Using curated project facts (site scrape skipped)")
-        except Exception:
-            LOGGER.warning("Could not cache oneaquahealth.eu brief")
-        try:
-            ENGINE.gemini_client().models.generate_content(
-                model=GEMINI_CHAT_MODEL.replace("models/", ""),
-                contents="OK",
-            )
-            LOGGER.info("Gemini generation warmup complete")
-        except Exception:
-            LOGGER.warning("Gemini generation warmup skipped")
-        try:
-            key = os.getenv("XAI_API_KEY") or ""
-            if key.startswith("xai-"):
-                probe = requests.post(
-                    "https://api.x.ai/v1/models",
-                    headers={"Authorization": f"Bearer {key}"},
-                    timeout=4.0,
-                )
-                if probe.status_code in {401, 403}:
-                    ENGINE._grok_disabled = True
-                    LOGGER.warning("Grok disabled for this process (HTTP %s)", probe.status_code)
-        except Exception:
-            LOGGER.warning("Grok warmup probe skipped")
+        ENGINE.ensure_ready()
+        ENGINE._project_docs = []
+        _warmup_llms()
     except Exception:
         LOGGER.exception("OneAquaHealth warmup failed")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    LOGGER.info("AquaAsk RAG API ready — seeding OneAquaHealth corpus in background")
+    chunks = ENGINE.ensure_ready()
+    LOGGER.info("AquaAsk RAG API ready — %s chunks on %s", chunks, CHROMA_DIR)
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _seed_oneaquahealth_job)
+    loop.run_in_executor(None, _warmup_llms)
     yield
 
 
@@ -1676,7 +1690,20 @@ if (ROOT / "h2o-assets").is_dir():
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "service": "aquaask", "url": PUBLIC_APP_URL, "repo": GITHUB_REPO_URL}
+    try:
+        chunks = int(ENGINE.collection().count() or 0)
+    except Exception:
+        chunks = 0
+    body = {
+        "ok": chunks > 0,
+        "chunks": chunks,
+        "service": "aquaask",
+        "url": PUBLIC_APP_URL,
+        "repo": GITHUB_REPO_URL,
+    }
+    if chunks <= 0:
+        return JSONResponse(body, status_code=503)
+    return body
 
 
 @app.get("/")

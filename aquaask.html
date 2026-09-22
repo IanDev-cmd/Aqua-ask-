@@ -1341,7 +1341,7 @@
   function runSearch(q){
     openCard(q);
     var ctrl = new AbortController();
-    var timer = setTimeout(function(){ ctrl.abort(); }, 18000);
+    var timer = setTimeout(function(){ ctrl.abort(); }, 28000);
     fetch(API_BASE + "/api/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

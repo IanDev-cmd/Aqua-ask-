@@ -17,10 +17,8 @@ Open http://127.0.0.1:8001
 
 ## Render
 
-On Render, startup loads `chroma_export.json.gz` (174 portable chunks + embeddings). The live `chroma_db/` folder is local-only — Windows HNSW binaries are not copied to Linux.
+## Render (Linux Docker RAG)
 
-If the service was created from GitHub (not Blueprint), set **Start Command** to:
+`render.yaml` builds a **Linux gcc** image. During `docker build` it loads `chroma_export.json.gz` and writes a native `/app/chroma_db` HNSW index (not the Windows folder). Set `GOOGLE_API_KEY` and `XAI_API_KEY` in the dashboard.
 
-```bash
-gunicorn your_application.wsgi --bind 0.0.0.0:$PORT --timeout 120
-```
+If the current service is still “Python native”, switch it to **Docker** and point at this Dockerfile, or create a new Blueprint from the repo.

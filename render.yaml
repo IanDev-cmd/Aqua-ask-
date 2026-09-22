@@ -1,21 +1,23 @@
-# AquaAsk — Render Blueprint
+# AquaAsk — Render Blueprint (Linux Docker RAG)
 # Live URL: https://aqua-ask.onrender.com
 # Repo:     https://github.com/IanDev-cmd/Aqua-ask-
 #
-# After first deploy, set these in the Render dashboard (they are not in git):
-#   GOOGLE_API_KEY, XAI_API_KEY
+# Image builds a gcc/manylinux Chroma HNSW index from chroma_export.json.gz.
+# After first deploy, set GOOGLE_API_KEY and XAI_API_KEY in the dashboard.
 
 services:
   - type: web
     name: aqua-ask
-    runtime: python
+    runtime: docker
     plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn your_application.wsgi --bind 0.0.0.0:$PORT --timeout 120
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.12.8"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: CHROMA_DIR
+        value: /app/chroma_db
       - key: PUBLIC_APP_URL
         value: https://aqua-ask.onrender.com
       - key: GITHUB_REPO_URL
