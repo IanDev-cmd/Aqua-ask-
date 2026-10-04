@@ -1,5 +1,5 @@
 {
-  "id": "/",
+  "id": "https://aqua-ask.onrender.com/",
   "name": "AquaAsk",
   "short_name": "AquaAsk",
   "description": "OneAquaHealth urban-stream search — answers, satellite maps, globe, graphs, and gallery.",
@@ -7,6 +7,7 @@
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
+  "prefer_related_applications": false,
   "orientation": "any",
   "background_color": "#001135",
   "theme_color": "#001135",

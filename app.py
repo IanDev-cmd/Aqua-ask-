@@ -28,6 +28,7 @@ from email.parser import BytesParser
 from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib.parse import parse_qs, urlencode, urlparse
+from threading import Lock
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -359,6 +360,96 @@ class SearchResponse(BaseModel):
     answer: str
     sources: list[SourceMetadata]
     modes: dict[str, Any] = Field(default_factory=dict)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str
+    keys: dict[str, str] = Field(default_factory=dict)
+    expirationTime: Optional[Any] = None
+
+
+class PushMessage(BaseModel):
+    title: str = "AquaAsk"
+    body: str = "OneAquaHealth update"
+    url: str = "/"
+    endpoint: Optional[str] = None
+
+
+VAPID_PUBLIC_KEY = os.getenv(
+    "VAPID_PUBLIC_KEY",
+    "BNnQVs-2O1yrx3B_ABuzTHQAVG1jtzD3zZMXlIG3IiHS49Ukq_Go3xGkQHRLjQPOLhGfAbF1Bt_YsXX6bc8SpcI",
+)
+VAPID_PRIVATE_KEY = os.getenv(
+    "VAPID_PRIVATE_KEY",
+    "-----BEGIN PRIVATE KEY-----\n"
+    "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg0zm1TDcGNrCO2h10\n"
+    "bLoDvbTFgX8hQ4JsXboTvwRACruhRANCAATZ0FbPtjtcq8dwfwAbs0x0AFRtY7cw\n"
+    "982TF5SBtyIh0uPVJKvxqN8RpEB0S40Dzi4RnwGxdQbf2LF1+m3PEqXC\n"
+    "-----END PRIVATE KEY-----",
+)
+VAPID_CONTACT = os.getenv("VAPID_CONTACT", "mailto:aquaask@oneaquahealth.eu")
+PUSH_SUBS_PATH = ROOT / "push_subs.json"
+_push_lock = Lock()
+
+try:
+    from pywebpush import WebPushException, webpush
+except Exception:  # pragma: no cover
+    webpush = None  # type: ignore[assignment]
+    WebPushException = Exception  # type: ignore[misc,assignment]
+
+
+def _load_push_subs() -> list[dict[str, Any]]:
+    if not PUSH_SUBS_PATH.is_file():
+        return []
+    try:
+        data = json.loads(PUSH_SUBS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_push_subs(rows: list[dict[str, Any]]) -> None:
+    PUSH_SUBS_PATH.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+
+
+def _upsert_push_sub(payload: PushSubscription) -> None:
+    row = payload.model_dump()
+    with _push_lock:
+        rows = [r for r in _load_push_subs() if r.get("endpoint") != payload.endpoint]
+        rows.append(row)
+        _save_push_subs(rows[-200:])
+
+
+def _drop_push_sub(endpoint: str) -> None:
+    with _push_lock:
+        rows = [r for r in _load_push_subs() if r.get("endpoint") != endpoint]
+        _save_push_subs(rows)
+
+
+def _send_web_push(sub: dict[str, Any], title: str, body: str, url: str = "/") -> bool:
+    if webpush is None:
+        LOGGER.warning("pywebpush is not installed; skipping push")
+        return False
+    try:
+        webpush(
+            subscription_info={
+                "endpoint": sub.get("endpoint"),
+                "keys": sub.get("keys") or {},
+            },
+            data=json.dumps({"title": title, "body": body, "url": url}),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_CONTACT},
+        )
+        return True
+    except WebPushException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in {404, 410}:
+            _drop_push_sub(str(sub.get("endpoint") or ""))
+        LOGGER.warning("web push failed: %s", exc)
+        return False
+    except Exception:
+        LOGGER.exception("web push crashed")
+        return False
 
 
 PILOT_CITIES = [
@@ -2248,13 +2339,11 @@ async def health():
 
 @app.get("/")
 @app.get("/index.html")
+@app.get("/install")
 async def home_page():
     page = ROOT / "index.html"
     if page.is_file():
         return FileResponse(page)
-    ask = ROOT / "aquaask.html"
-    if ask.is_file():
-        return FileResponse(ask)
     return {"service": "aquaask-rag", "docs": "/docs", "url": PUBLIC_APP_URL, "repo": GITHUB_REPO_URL}
 
 
@@ -2306,6 +2395,50 @@ async def service_worker():
         media_type="text/javascript",
         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
     )
+
+
+@app.get("/api/push/vapid")
+async def push_vapid():
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(payload: PushSubscription):
+    if not payload.endpoint or not payload.keys.get("p256dh") or not payload.keys.get("auth"):
+        raise HTTPException(status_code=400, detail="Invalid push subscription")
+    _upsert_push_sub(payload)
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+async def push_test(payload: PushMessage):
+    with _push_lock:
+        rows = _load_push_subs()
+    targets = [r for r in rows if not payload.endpoint or r.get("endpoint") == payload.endpoint]
+    if payload.endpoint and not targets:
+        targets = [r for r in rows if r.get("endpoint") == payload.endpoint]
+    sent = 0
+    title = payload.title or "AquaAsk"
+    body = payload.body or "AquaAsk is installed. You will get OneAquaHealth alerts as real app notifications."
+    for sub in targets[-8:]:
+        if _send_web_push(sub, title, body, payload.url or "/"):
+            sent += 1
+    return {"ok": sent > 0, "sent": sent}
+
+
+@app.post("/api/push/me")
+async def push_me(payload: PushMessage):
+    if not payload.endpoint:
+        raise HTTPException(status_code=400, detail="endpoint required")
+    with _push_lock:
+        rows = [r for r in _load_push_subs() if r.get("endpoint") == payload.endpoint]
+    sent = 0
+    title = payload.title or "AquaAsk"
+    body = payload.body or "Your OneAquaHealth answer is ready."
+    for sub in rows:
+        if _send_web_push(sub, title, body, payload.url or "/"):
+            sent += 1
+    return {"ok": sent > 0, "sent": sent}
 
 
 if (ROOT / "pwa").is_dir():

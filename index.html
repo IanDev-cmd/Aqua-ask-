@@ -554,14 +554,14 @@
   #graphTip{margin:6px 0 0;font-size:12px;color:var(--muted);min-height:1.2em;}
   .graph-note{margin:4px 0 0;font-size:11px;color:#80868b;}
   body.is-maps-tab .search-wrap{width:min(1100px,96vw);}
-  body.is-maps-tab .quote-card{padding:16px 16px 14px;}
-  body.map-fs .quote-card h2,
-  body.map-fs .status{display:none;}
+  body.is-maps-tab #quoteCard{padding:16px 16px 14px;}
+  body.map-fs #quoteCard h2,
+  body.map-fs #quoteCard .status{display:none;}
   body.map-fs .mode-bar{position:relative;z-index:50;margin-top:8px;}
-  body.map-fs .quote-card{
+  body.map-fs #quoteCard{
     background:transparent;box-shadow:none;padding:0;
   }
-  body.map-fs .quote-card.gem-glow::after{display:none;}
+  body.map-fs #quoteCard.gem-glow::after{display:none;}
   body.map-fs #map2d,
   body.map-fs #globeMount{
     position:fixed;inset:0;z-index:21;
@@ -628,12 +628,40 @@
   .dialog-row .ghost{color:#1a73e8;}
   .dialog-row .primary{background:#1a73e8;color:#fff;}
   .dialog-row .primary:disabled{opacity:.55;}
-  .pwa-card{
-    width:min(420px,100%);
-    padding:22px 22px 16px;
+  body.pwa-open{overflow:hidden;}
+  #pwaSheet{
+    z-index:60;
+    align-items:center;
+    justify-content:center;
+  }
+  #pwaCard.pwa-card{
+    width:min(420px, calc(100vw - 40px));
+    height:auto !important;
+    max-height:min(88vh, 680px);
+    margin:0 auto;
+    padding:28px 24px 20px;
+    text-align:center;
+    align-items:center;
+    flex:none;
+    overflow:auto;
+    background:#fff;
+    box-shadow:0 18px 50px rgba(15,23,42,.22);
   }
   .pwa-kicker{
-    margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    margin:0 auto;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    text-align:center;width:100%;
+  }
+  .pwa-card h2{
+    margin-top:8px;
+    text-align:center;
+    white-space:normal;
+    width:100%;
+  }
+  .pwa-card .status{
+    text-align:center;
+    max-width:34em;
+    margin-left:auto;
+    margin-right:auto;
   }
   .pwa-qr{
     margin:16px auto 8px;
@@ -647,7 +675,22 @@
   .pwa-url{
     margin:0 0 8px;
     font-size:11px;color:var(--muted);word-break:break-all;text-align:center;
+    width:100%;
   }
+  .pwa-card .dialog-row{
+    justify-content:center;
+    width:100%;
+  }
+  .pwa-push{
+    all:unset;
+    cursor:pointer;
+    display:block;
+    margin:10px auto 0;
+    color:#1a73e8;
+    font-size:14px;
+    font-weight:500;
+  }
+  .pwa-push:disabled{opacity:.55;cursor:default;}
 
   @media (max-width:720px){
     .cluster{padding:max(56px, env(safe-area-inset-top, 0px) + 40px) 12px 16px;}
@@ -669,7 +712,7 @@
     .gal-card.is-next{display:none;}
     .gal-card.is-front{flex:1 1 100%;}
     .map-subs{flex-wrap:wrap;}
-    .pwa-card{width:min(420px,100%);}
+    .pwa-card{width:min(420px, calc(100vw - 24px));}
   }
   @media (display-mode: standalone){
     .top{padding-top:max(12px, env(safe-area-inset-top, 0px));}
@@ -846,7 +889,7 @@
       </span>
       <span>
         <strong>Get the app</strong>
-        <em>Install AquaAsk on your phone</em>
+        <em>Install AquaAsk in Chrome</em>
       </span>
     </a>
   </div>
@@ -870,15 +913,16 @@
 
 <div class="sheet" id="pwaSheet">
   <article class="quote-card gem-glow pwa-card" id="pwaCard">
-    <p class="pwa-kicker">Mobile app</p>
+    <p class="pwa-kicker">Chrome app</p>
     <h2>Install AquaAsk</h2>
-    <p class="status" id="pwaNote">Scan this QR on your phone. It opens AquaAsk and the install prompt so you can add it as a real home-screen app.</p>
-    <div class="pwa-qr" id="pwaQr" role="img" aria-label="QR code to install AquaAsk"></div>
+    <p class="status" id="pwaNote">Scan this QR with your phone. Chrome asks to install AquaAsk as an app — not a website tab.</p>
+    <div class="pwa-qr" id="pwaQr" role="img" aria-label="QR code to install AquaAsk as a Chrome app"></div>
     <p class="pwa-url" id="pwaUrl"></p>
     <div class="dialog-row">
       <button class="ghost" type="button" id="pwaClose">Close</button>
-      <button class="primary" type="button" id="pwaInstall">Install on this device</button>
+      <button class="primary" type="button" id="pwaInstall">Install app</button>
     </div>
+    <button class="pwa-push" type="button" id="pwaPush">Enable notifications</button>
   </article>
 </div>
 
@@ -1233,6 +1277,9 @@
         : "No matching publications — showing the best available answer.";
       resultAnswer.textContent = ((data && data.answer) || "").replace(/\[Source:\s*[^\]]+\]/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
       applyModes((data && data.modes) || {});
+      if(document.hidden && window.notifyAquaAsk){
+        window.notifyAquaAsk("AquaAsk", "Your OneAquaHealth answer is ready.", location.pathname + location.search);
+      }
     }).catch(function(){
       window.clearInterval(statusTimer);
       settlePips([]);
@@ -1400,7 +1447,7 @@
 </script>
 <script src="modes.js?v=globe2"></script>
 <script src="qrcode.min.js"></script>
-<script src="pwa.js?v=1"></script>
+<script src="pwa.js?v=4"></script>
 <script src="agent-bridge.js"></script>
 <script src="site-chrome.js"></script>
 </body>

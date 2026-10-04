@@ -1,18 +1,10 @@
-/* Page buttons and the ElevenLabs voice widget on every screen. */
+/* Logs gear and the ElevenLabs voice widget. */
 (function () {
-  var path = location.pathname;
-  var here = "home";
-  if (path.indexOf("desktop.html") !== -1) here = "globe";
-  else if (path.indexOf("aquaask.html") !== -1) here = "ask";
-  else if (path.indexOf("/mobile/") !== -1) here = "mobile";
-
   var style = document.createElement("style");
   style.textContent = [
     "body.il-on-home .il-gear{top:18px;}",
     ".il-gear{position:fixed;z-index:80;top:14px;left:14px;width:36px;height:36px;border:0;border-radius:50%;",
     "background:#fff;color:#12202c;box-shadow:0 2px 10px rgba(0,0,0,.28);cursor:pointer;display:grid;place-items:center;padding:0;}",
-    "body.il-on-globe .il-gear{top:auto;bottom:18px;left:8px;}",
-    "body.il-on-globe .il-log{top:auto;bottom:62px;left:8px;}",
     ".il-gear svg{width:18px;height:18px;display:block;}",
     ".il-log{display:none;position:fixed;z-index:80;top:58px;left:14px;width:min(440px,calc(100vw - 28px));",
     "height:min(48vh,380px);overflow:auto;background:rgba(8,16,24,.94);color:#d7ecf5;",
@@ -21,8 +13,7 @@
     ".il-log .err{color:#ffb4a8;}.il-log .ok{color:#b6f5c8;}.il-log .info{color:#d7ecf5;}"
   ].join("");
   document.head.appendChild(style);
-  if (here === "globe") document.body.classList.add("il-on-globe");
-  if (here === "home") document.body.classList.add("il-on-home");
+  document.body.classList.add("il-on-home");
 
   var gear = document.createElement("button");
   gear.type = "button";
