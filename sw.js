@@ -1,5 +1,5 @@
 /* AquaAsk PWA service worker — app shell + Web Push */
-var CACHE = "aquaask-pwa-v4";
+var CACHE = "aquaask-pwa-v5";
 var PRECACHE = [
   "/",
   "/index.html",

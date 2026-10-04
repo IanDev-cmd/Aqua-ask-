@@ -522,87 +522,22 @@
     display:flex;gap:6px;flex-wrap:wrap;
     margin:16px 0 0;flex:none;
   }
-  .mode-tab,.map-sub{
+  .mode-tab{
     all:unset;cursor:pointer;
     height:32px;padding:0 12px;border-radius:999px;
     font-size:13px;font-weight:500;color:var(--muted);
     border:1px solid var(--line);
   }
-  .mode-tab.is-on,.map-sub.is-on{
+  .mode-tab.is-on{
     color:#fff;background:#202124;border-color:#202124;
   }
-  .map-subs{display:flex;gap:6px;margin:10px 0 8px;}
   .mode-panels{flex:1 1 auto;min-height:0;position:relative;}
   .mode-panel{display:none;height:100%;min-height:0;}
   .mode-panel.is-on{display:flex;flex-direction:column;}
   .mode-fallback{color:var(--muted);font-size:14px;}
-  #map2d,#globeMount{
-    flex:1 1 auto;min-height:320px;border-radius:18px;overflow:hidden;
-  }
-  #globeMount{
-    background:
-      radial-gradient(circle at 42% 36%, #9ad8f4 0%, #1e86c4 44%, #0b4f88 71%, transparent 72.5%),
-      #001135;
-  }
-  #map2d{background:#001135;}
-  .quote-card.map-globe #map2d{display:none;}
-  .quote-card.map-globe #globeMount{display:block;}
-  .quote-card:not(.map-globe) #globeMount{display:none;}
-  .quote-card:not(.map-globe) #globeLabel{display:none;}
-  #globeLabel{margin:8px 0 0;font-size:12px;color:var(--muted);}
   #graphSvg{width:100%;height:min(320px,42vh);flex:none;}
   #graphTip{margin:6px 0 0;font-size:12px;color:var(--muted);min-height:1.2em;}
   .graph-note{margin:4px 0 0;font-size:11px;color:#80868b;}
-  body.is-maps-tab .search-wrap{width:min(1100px,96vw);}
-  body.is-maps-tab #quoteCard{padding:16px 16px 14px;}
-  body.map-fs #quoteCard h2,
-  body.map-fs #quoteCard .status{display:none;}
-  body.map-fs .mode-bar{position:relative;z-index:50;margin-top:8px;}
-  body.map-fs #quoteCard{
-    background:transparent;box-shadow:none;padding:0;
-  }
-  body.map-fs #quoteCard.gem-glow::after{display:none;}
-  body.map-fs #map2d,
-  body.map-fs #globeMount{
-    position:fixed;inset:0;z-index:21;
-    min-height:0;border-radius:0;
-  }
-  body.map-fs .map-subs{
-    position:fixed;top:88px;left:50%;transform:translateX(-50%);
-    z-index:55;margin:0;
-    background:rgba(255,255,255,.94);
-    padding:6px 8px;border-radius:999px;
-    box-shadow:0 8px 24px rgba(0,0,0,.18);
-  }
-  body.map-fs .search{position:relative;z-index:24;}
-  .gallery-stage{
-    position:relative;
-    flex:1 1 auto;
-    min-height:0;
-    height:100%;
-    display:flex;
-    align-items:stretch;
-    gap:18px;
-    padding:4px 0 0;
-  }
-  .gal-card{
-    display:none;
-    position:relative;
-    min-width:0;
-    min-height:280px;
-    border-radius:20px;
-    overflow:hidden;
-    box-shadow:0 14px 36px rgba(15,23,42,.22);
-  }
-  .gal-card.is-front{display:block;flex:1 1 70%;}
-  .gal-card.is-next{display:block;flex:0 0 26%;opacity:.95;}
-  .gal-card.is-prev{display:none;}
-  .gal-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#123;border:0;}
-  .gal-veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(16,24,40,.08),rgba(16,24,40,.72));}
-  .gal-kicker,.gal-title,.gal-cap{position:relative;z-index:2;color:#fff;margin:0 18px;}
-  .gal-kicker{margin-top:18px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;}
-  .gal-title{margin-top:10px;font-size:22px;font-weight:600;}
-  .gal-cap{margin-top:8px;margin-bottom:16px;font-size:13px;opacity:.9;line-height:1.4;}
 
   .sheet{
     position:fixed;inset:0;z-index:40;
@@ -699,7 +634,6 @@
     .wordmark{font-size:clamp(36px,10vw,56px);}
     .search{height:52px;}
     .search-wrap{width:min(100%, calc(100vw - 24px));}
-    body.is-maps-tab .search-wrap{width:min(100%, calc(100vw - 16px));}
     .ai-mode span{display:none;}
     .ai-mode{padding:0 10px;}
     .cards{max-height:none;gap:10px;}
@@ -709,9 +643,6 @@
     .apps{right:12px;width:min(320px,calc(100vw - 24px));}
     .quote-card{padding:18px 16px 14px;border-radius:22px;}
     .quote-card h2{font-size:16px;}
-    .gal-card.is-next{display:none;}
-    .gal-card.is-front{flex:1 1 100%;}
-    .map-subs{flex-wrap:wrap;}
     .pwa-card{width:min(420px, calc(100vw - 24px));}
   }
   @media (display-mode: standalone){
@@ -812,31 +743,16 @@
         <p class="status" id="resultStatus">Querying OneAquaHealth sources…</p>
         <div class="mode-bar" id="modeBar" hidden>
           <button class="mode-tab is-on" type="button" data-tab="answer">Answer</button>
-          <button class="mode-tab" type="button" data-tab="maps">Maps</button>
           <button class="mode-tab" type="button" data-tab="graphs">Graphs</button>
-          <button class="mode-tab" type="button" data-tab="gallery">Gallery</button>
         </div>
         <div class="mode-panels">
           <div class="mode-panel is-on" data-panel="answer">
             <p class="result-answer" id="resultAnswer"></p>
           </div>
-          <div class="mode-panel" data-panel="maps">
-            <div class="map-subs">
-              <button class="map-sub is-on" type="button" data-mapview="2d">2D</button>
-              <button class="map-sub" type="button" data-mapview="globe">Globe</button>
-              <button class="map-sub" type="button" data-mapfull>Full</button>
-            </div>
-            <div id="map2d" role="img" aria-label="Urban stream map"></div>
-            <div id="globeMount" aria-label="Pilot-city globe"></div>
-            <p id="globeLabel"></p>
-          </div>
           <div class="mode-panel" data-panel="graphs">
             <svg id="graphSvg" viewBox="0 0 640 280" role="img" aria-label="OneAquaHealth indicators"></svg>
             <p id="graphTip"></p>
             <p class="graph-note" id="graphNote"></p>
-          </div>
-          <div class="mode-panel" data-panel="gallery">
-            <div class="gallery-stage" id="galleryStage"></div>
           </div>
         </div>
       </article>
@@ -1204,7 +1120,7 @@
     stopBombard();
     window.clearInterval(statusTimer);
     window.clearTimeout(revealTimer);
-    document.body.classList.remove("is-thinking","is-leaving","has-result","map-fs","is-maps-tab");
+    document.body.classList.remove("is-thinking","is-leaving","has-result");
     askForm.classList.remove("is-querying");
     queryRail.innerHTML = "";
     queryRail.setAttribute("aria-hidden","true");
@@ -1445,7 +1361,7 @@
   }
 })();
 </script>
-<script src="modes.js?v=globe2"></script>
+<script src="modes.js?v=graphs1"></script>
 <script src="qrcode.min.js"></script>
 <script src="pwa.js?v=4"></script>
 <script src="agent-bridge.js"></script>

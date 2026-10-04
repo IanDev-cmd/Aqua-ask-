@@ -111,16 +111,14 @@ SYSTEM_PROMPT = """You are AquaAsk, an elite, scientific conversational AI engin
 5. ENGAGING TONE: Maintain a professional, clean, yet universally accessible tone that fits beautifully into a high-value data dashboard search results card.
 
 ### MULTIMODAL CARD CONTRACT:
-The AquaAsk UI shows the same answer on four tabs: Answer, Maps (2D streams+radius and a 3D globe of the five pilots), Graphs, and Gallery.
+The AquaAsk UI shows the same answer on two tabs: Answer (prose) and Graphs.
 After the prose answer, output exactly one fenced JSON block tagged aquaask-modes. No commentary after it.
-Use ONLY numbers, place names, and image cues that appear in the retrieved context. If a field is unknown, omit it rather than inventing it.
+Use ONLY numbers and place names that appear in the retrieved context. If a field is unknown, omit it rather than inventing it.
 Schema:
 ```aquaask-modes
 {
-  "default_tab": "answer|maps|graphs|gallery",
+  "default_tab": "answer|graphs",
   "focus_city": "coimbra|toulouse|ghent|benevento|oslo|null",
-  "radius_km": 5,
-  "map_view": "2d|globe",
   "graph": {
     "title": "short title",
     "subtitle": "what the axes mean",
@@ -131,18 +129,13 @@ Schema:
     "highlight_label": "Coimbra",
     "highlight_value": "42",
     "highlight_unit": "%"
-  },
-  "gallery": [
-    {"kind":"city|source|image","title":"...","kicker":"...","metric":"...","unit":"...","image_query":"search phrase","caption":"..."}
-  ]
+  }
 }
 ```
 Rules for modes:
-- default_tab is maps when the query is geographic, graphs when it asks for comparison/trend/indicator, gallery when it asks for photos/sites, else answer.
-- radius_km is an integer 2–15 inferred from the query (site/reach → smaller, city/region → larger). Default 5.
+- default_tab is graphs when the query asks for comparison/trend/indicator, else answer.
 - graph.points length MUST equal labels length. Prefer extracted values from the chunks. If you cannot extract a comparable series, omit "graph".
-- gallery: for geographic queries, one frame per mentioned pilot city (or all five). Otherwise one frame per key source. image_query is a short web-search phrase, not a URL you invented.
-- Never add Share/quote/proposal buttons. Never mention betting, finance dashboards, or Harmony city names (Jakarta, etc.).
+- Never add maps, gallery, Share/quote/proposal buttons. Never mention betting, finance dashboards, or Harmony city names (Jakarta, etc.).
 """
 UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "aquaask@oneaquahealth.eu")
 
@@ -462,8 +455,6 @@ PILOT_CITIES = [
         "stream": "Mondego urban reaches",
         "risk": "watch",
         "metric": "pilot",
-        "image": "h2o-assets/aquaask-bg-1.jpg",
-        "wiki": "Coimbra",
     },
     {
         "id": "toulouse",
@@ -474,8 +465,6 @@ PILOT_CITIES = [
         "stream": "Garonne urban corridor",
         "risk": "watch",
         "metric": "pilot",
-        "image": "h2o-assets/aquaask-bg-2.jpg",
-        "wiki": "Toulouse",
     },
     {
         "id": "ghent",
@@ -486,8 +475,6 @@ PILOT_CITIES = [
         "stream": "Scheldt / Leie urban waters",
         "risk": "ok",
         "metric": "pilot",
-        "image": "h2o-assets/aquaask-bg-3.jpg",
-        "wiki": "Ghent",
     },
     {
         "id": "benevento",
@@ -498,8 +485,6 @@ PILOT_CITIES = [
         "stream": "Calore / Sabato",
         "risk": "watch",
         "metric": "pilot",
-        "image": "h2o-assets/aquaask-bg-4.jpg",
-        "wiki": "Benevento",
     },
     {
         "id": "oslo",
@@ -510,8 +495,6 @@ PILOT_CITIES = [
         "stream": "Akerselva / Oslofjord inlets",
         "risk": "ok",
         "metric": "pilot",
-        "image": "h2o-assets/aquaask-bg-1.jpg",
-        "wiki": "Oslo",
     },
 ]
 _CITY_ALIAS = {
@@ -580,37 +563,12 @@ def _mentioned_cities(text: str) -> list[dict[str, Any]]:
     return found
 
 
-def _infer_radius_km(query: str, llm_radius: Any = None) -> int:
-    try:
-        if llm_radius is not None:
-            value = int(float(llm_radius))
-            if 2 <= value <= 15:
-                return value
-    except (TypeError, ValueError):
-        pass
-    match = re.search(r"(\d{1,2})\s*(km|kilomet)", (query or ""), re.I)
-    if match:
-        value = int(match.group(1))
-        return max(2, min(15, value))
-    q = (query or "").lower()
-    if any(word in q for word in ("site", "reach", "sampling", "transect", "buffer")):
-        return 3
-    if any(word in q for word in ("region", "basin", "catchment", "all five", "pilot cities")):
-        return 10
-    return 5
-
-
 def _infer_default_tab(query: str, llm_tab: str | None = None) -> str:
-    allowed = {"answer", "maps", "graphs", "gallery"}
-    if (llm_tab or "") in allowed:
-        return str(llm_tab)
+    if llm_tab == "graphs":
+        return "graphs"
     q = (query or "").lower()
-    if any(word in q for word in ("photo", "image", "picture", "gallery", "looks like")):
-        return "gallery"
     if any(word in q for word in ("graph", "trend", "compare", "indicator", "chart", "%", "index")):
         return "graphs"
-    if any(word in q for word in ("map", "globe", "where", "geo", "radius", "stream", "city", "coimbra", "toulouse", "ghent", "benevento", "oslo")):
-        return "maps"
     return "answer"
 
 
@@ -628,114 +586,6 @@ def _split_modes_block(answer: str) -> tuple[str, dict[str, Any]]:
         return prose, {}
 
 
-def _wiki_thumb(title: str) -> str:
-    slug = (title or "").replace(" ", "_")
-    return f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}"
-
-
-def _wiki_photo(title: str) -> str:
-    slug = (title or "").replace(" ", "_")
-    try:
-        response = requests.get(
-            f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}",
-            timeout=3.5,
-            headers={"User-Agent": "AquaAsk/1.0 (OneAquaHealth hackathon)"},
-        )
-        if not response.ok:
-            return ""
-        data = response.json()
-        return str((data.get("originalimage") or data.get("thumbnail") or {}).get("source") or "")
-    except Exception:
-        return ""
-
-
-def _ddg_images(query: str, limit: int = 4) -> list[str]:
-    q = (query or "").strip()
-    if not q:
-        return []
-    try:
-        try:
-            from ddgs import DDGS
-        except Exception:
-            from duckduckgo_search import DDGS  # type: ignore
-        client = DDGS()
-        try:
-            rows = client.images(q, max_results=limit) or []
-        except TypeError:
-            rows = client.images(q, max_results=limit) or []
-        finally:
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
-        urls: list[str] = []
-        for item in rows:
-            url = str(item.get("image") or item.get("thumbnail") or "")
-            if url.startswith("http"):
-                urls.append(url)
-        return urls
-    except Exception:
-        LOGGER.warning("DuckDuckGo image search failed for %s", q[:80])
-        return []
-
-
-def _http_image(url: str) -> bool:
-    return str(url or "").startswith(("http://", "https://"))
-
-
-def _hydrate_gallery_photos(gallery: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not gallery:
-        return gallery
-    extras: list[str] = []
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        jobs: dict[Any, tuple[str, int]] = {}
-        for i, frame in enumerate(gallery):
-            raw = str(frame.get("image") or "")
-            if raw.startswith("h2o-assets") or not _http_image(raw):
-                frame["image"] = ""
-            wiki = str(frame.get("wiki_title") or "")
-            query = str(frame.get("image_query") or frame.get("title") or "")
-            if wiki:
-                jobs[pool.submit(_wiki_photo, wiki)] = ("wiki", i)
-            if query:
-                jobs[pool.submit(_ddg_images, query, 4)] = ("ddg", i)
-        try:
-            for fut in jobs:
-                kind, i = jobs[fut]
-                try:
-                    val = fut.result(timeout=4.0)
-                except Exception:
-                    continue
-                current = str(gallery[i].get("image") or "")
-                if kind == "wiki" and val:
-                    gallery[i]["image"] = val
-                elif kind == "ddg" and isinstance(val, list) and val:
-                    if not _http_image(gallery[i].get("image")):
-                        gallery[i]["image"] = val[0]
-                    extras.extend(val)
-        except Exception:
-            LOGGER.warning("Gallery photo hydrate timed out")
-    seen = {str(frame.get("image") or "") for frame in gallery}
-    for url in extras:
-        if not _http_image(url) or url in seen:
-            continue
-        seen.add(url)
-        gallery.append(
-            {
-                "kind": "photo",
-                "title": "Urban stream",
-                "kicker": "Web photo",
-                "metric": "",
-                "unit": "",
-                "caption": "Live web image",
-                "image": url,
-                "image_query": "",
-            }
-        )
-        if len(gallery) >= 10:
-            break
-    return gallery
-
-
 def _build_modes(
     query: str,
     answer: str,
@@ -747,12 +597,10 @@ def _build_modes(
     focus = _city_by_id(str(llm_modes.get("focus_city") or "").lower())
     if focus is None:
         focus = mentioned[0] if mentioned else None
-    radius_km = _infer_radius_km(query, llm_modes.get("radius_km"))
-    map_cities = mentioned or list(PILOT_CITIES)
-    globe_cities = list(PILOT_CITIES)
-    default_tab = _infer_default_tab(query, llm_modes.get("default_tab") if isinstance(llm_modes.get("default_tab"), str) else None)
-    q = (query or "").lower()
-    map_view = "globe" if ("globe" in q or "3d" in q) else "2d"
+    default_tab = _infer_default_tab(
+        query,
+        llm_modes.get("default_tab") if isinstance(llm_modes.get("default_tab"), str) else None,
+    )
 
     graph = llm_modes.get("graph") if isinstance(llm_modes.get("graph"), dict) else None
     if graph:
@@ -793,99 +641,10 @@ def _build_modes(
         if focus:
             graph["highlight_label"] = focus["name"]
 
-    gallery: list[dict[str, Any]] = []
-    raw_gallery = llm_modes.get("gallery") if isinstance(llm_modes.get("gallery"), list) else []
-    for frame in raw_gallery[:8]:
-        if not isinstance(frame, dict):
-            continue
-        gallery.append(
-            {
-                "kind": str(frame.get("kind") or "image"),
-                "title": str(frame.get("title") or "OneAquaHealth"),
-                "kicker": str(frame.get("kicker") or ""),
-                "metric": str(frame.get("metric") or ""),
-                "unit": str(frame.get("unit") or ""),
-                "caption": str(frame.get("caption") or ""),
-                "image": str(frame.get("image") or ""),
-                "image_query": str(frame.get("image_query") or frame.get("title") or ""),
-            }
-        )
-    geo_query = bool(mentioned) or default_tab in {"maps", "gallery"}
-    if geo_query and len(gallery) < 2:
-        gallery = []
-        for city in map_cities:
-            gallery.append(
-                {
-                    "kind": "city",
-                    "title": city["name"],
-                    "kicker": city["stream"],
-                    "metric": str(int(round(city["lat"]))),
-                    "unit": "°N",
-                    "caption": f"{city['country']} · {radius_km} km urban-stream radius",
-                    "image": "",
-                    "image_query": f"{city['name']} {city['country']} river city",
-                    "wiki_title": city["wiki"],
-                }
-            )
-    if not gallery:
-        for src in (sources or [])[:5]:
-            if hasattr(src, "model_dump"):
-                src = src.model_dump()
-            title = (src or {}).get("publication_title") or (src or {}).get("section") or "Source"
-            gallery.append(
-                {
-                    "kind": "source",
-                    "title": title,
-                    "kicker": (src or {}).get("doi") or "publication",
-                    "metric": "",
-                    "unit": "",
-                    "caption": (src or {}).get("source_origin") or "",
-                    "image": "",
-                    "image_query": f"{title} urban stream OneAquaHealth",
-                }
-            )
-
     return {
         "default_tab": default_tab,
-        "map_view": map_view,
-        "radius_km": radius_km,
         "focus_city": focus["id"] if focus else None,
-        "map_2d": {
-            "provider": "leaflet",
-            "center": {
-                "lat": (focus or map_cities[0])["lat"],
-                "lon": (focus or map_cities[0])["lon"],
-            },
-            "radius_km": radius_km,
-            "cities": [
-                {
-                    "id": c["id"],
-                    "name": c["name"],
-                    "lat": c["lat"],
-                    "lon": c["lon"],
-                    "stream": c["stream"],
-                    "risk": c["risk"],
-                    "radius_km": radius_km if (not focus or c["id"] == focus["id"]) else max(2, radius_km // 2),
-                }
-                for c in map_cities
-            ],
-            "overpass": {
-                "lat": (focus or map_cities[0])["lat"],
-                "lon": (focus or map_cities[0])["lon"],
-                "radius_m": radius_km * 1000,
-            },
-        },
-        "globe": {
-            "fly": [c["id"] for c in globe_cities],
-            "focus": (focus or globe_cities[0])["id"],
-            "cities": [
-                {"id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"]}
-                for c in globe_cities
-            ],
-        },
         "graph": graph,
-        "gallery": _hydrate_gallery_photos(gallery),
-        "images": [],
     }
 
 

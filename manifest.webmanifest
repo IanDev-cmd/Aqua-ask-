@@ -2,7 +2,7 @@
   "id": "https://aqua-ask.onrender.com/",
   "name": "AquaAsk",
   "short_name": "AquaAsk",
-  "description": "OneAquaHealth urban-stream search — answers, satellite maps, globe, graphs, and gallery.",
+  "description": "OneAquaHealth urban-stream search — answers and graphs.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

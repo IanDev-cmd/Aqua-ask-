@@ -26,13 +26,6 @@
     return "";
   }
 
-  function openMaps(view) {
-    var tab = document.querySelector('[data-tab="maps"]');
-    if (tab) tab.click();
-    if (view === "globe") return click('[data-mapview="globe"]');
-    return click('[data-mapview="2d"]') || !!tab;
-  }
-
   function runHere(command) {
     var action = command.action;
     var detail = command.detail || "";
@@ -53,8 +46,9 @@
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       return true;
     }
-    if (action === "open_globe") return openMaps("globe");
-    if (action === "open_maps") return openMaps("2d");
+    if (action === "open_globe" || action === "open_maps") {
+      return click('[data-tab="graphs"]') || click('[data-tab="answer"]');
+    }
     if (action === "close_maps") return click('[data-tab="answer"]');
     if (action === "open_mobile") {
       if (typeof window.openAquaPwa === "function") { window.openAquaPwa(false); return true; }
