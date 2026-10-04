@@ -2284,11 +2284,6 @@ async def modes_js():
     return FileResponse(ROOT / "modes.js", media_type="text/javascript")
 
 
-@app.get("/tour.js")
-async def tour_js():
-    return FileResponse(ROOT / "tour.js", media_type="text/javascript")
-
-
 @app.get("/pwa.js")
 async def pwa_js():
     return FileResponse(ROOT / "pwa.js", media_type="text/javascript")

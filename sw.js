@@ -1,10 +1,9 @@
 /* AquaAsk PWA service worker — app shell for every screen */
-var CACHE = "aquaask-pwa-v1";
+var CACHE = "aquaask-pwa-v3";
 var PRECACHE = [
   "/",
   "/index.html",
   "/modes.js",
-  "/tour.js",
   "/pwa.js",
   "/qrcode.min.js",
   "/agent-bridge.js",

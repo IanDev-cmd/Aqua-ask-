@@ -37,24 +37,37 @@
   .stage{position:fixed;inset:0;overflow:hidden;background:#04141c;}
   .stage-bg{
     position:absolute;
-    inset:-14%;
-    width:128%;
-    height:128%;
+    inset:0;
+    width:100%;
+    height:100%;
     object-fit:cover;
     object-position:center;
     pointer-events:none;
     opacity:0;
     transform:translate3d(0,0,0);
-    transition:opacity 1.85s ease;
-    will-change:transform, opacity;
+    z-index:0;
   }
   .stage-bg.is-on{
     opacity:1;
-    animation:ken 32s linear infinite alternate;
+    z-index:1;
   }
-  @keyframes ken{
+  .stage-bg.is-leave{
+    opacity:1;
+    z-index:2;
+    animation:bg-scroll-out 1.15s cubic-bezier(.22,1,.36,1) forwards;
+  }
+  .stage-bg.is-enter{
+    opacity:1;
+    z-index:3;
+    animation:bg-scroll-in 1.15s cubic-bezier(.22,1,.36,1) forwards;
+  }
+  @keyframes bg-scroll-out{
     from{transform:translate3d(0,0,0);}
-    to{transform:translate3d(-10%,-7%,0);}
+    to{transform:translate3d(-100%,0,0);}
+  }
+  @keyframes bg-scroll-in{
+    from{transform:translate3d(100%,0,0);}
+    to{transform:translate3d(0,0,0);}
   }
   .veil{
     position:absolute;inset:0;z-index:1;pointer-events:none;
@@ -362,69 +375,6 @@
     display:none !important;
     opacity:0 !important;
   }
-  .tour-glow{
-    position:relative;
-    isolation:isolate;
-    z-index:46;
-    box-shadow:
-      0 0 0 2px rgba(66,133,244,.9),
-      0 0 10px rgba(66,133,244,.45),
-      0 0 16px rgba(234,67,53,.32),
-      0 0 22px rgba(251,188,5,.28),
-      0 0 26px rgba(52,168,83,.28);
-  }
-  .tour-glow::after{
-    content:"";
-    position:absolute;
-    inset:-5px;
-    border-radius:inherit;
-    padding:3px;
-    background:conic-gradient(from var(--gem-angle), var(--g-blue), var(--g-red), var(--g-orange), var(--g-yellow), var(--g-green), var(--g-blue));
-    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite:xor;
-    mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    mask-composite:exclude;
-    opacity:1;
-    pointer-events:none;
-    z-index:3;
-    animation:gem-spin 2.4s linear infinite;
-  }
-  .wordmark.tour-glow::after{border-radius:18px;}
-  .search.tour-glow::after,.ai-mode.tour-glow::after,.mode-tab.tour-glow::after,.map-sub.tour-glow::after{border-radius:999px;}
-  .gcard.tour-glow::after{border-radius:16px;}
-  .quote-card.tour-glow::after{border-radius:28px;}
-  .icon-btn.tour-glow::after,.apps-btn.tour-glow::after,.avatar.tour-glow::after{border-radius:50%;}
-  .top a.tour-glow{border-radius:10px;padding:6px 10px;}
-  .top a.tour-glow::after{border-radius:10px;}
-  .plus-menu.tour-glow::after,.apps.tour-glow::after{border-radius:24px;}
-  .tour-card{
-    position:fixed;z-index:70;
-    width:min(320px,calc(100vw - 28px));
-    background:#fff;color:var(--ink);
-    border-radius:18px;padding:14px 14px 12px;
-    box-shadow:0 16px 40px rgba(15,23,42,.28);
-    display:none;
-  }
-  .tour-card.open{display:block;}
-  .tour-card .tour-kicker{
-    margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
-  }
-  .tour-card h3{margin:6px 0 0;font-size:16px;font-weight:600;letter-spacing:-.02em;}
-  .tour-card p{margin:6px 0 0;font-size:13px;line-height:1.45;color:#3c4043;}
-  .tour-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px;}
-  .tour-actions button{
-    all:unset;cursor:pointer;height:32px;padding:0 12px;border-radius:999px;font-size:13px;font-weight:500;
-  }
-  .tour-actions .ghost{color:#5f6368;}
-  .tour-actions .next{background:#202124;color:#fff;}
-  .tour-fab{
-    all:unset;cursor:pointer;
-    height:32px;padding:0 12px;border-radius:999px;
-    font-size:13px;font-weight:500;color:#fff;
-    border:1px solid rgba(255,255,255,.35);
-  }
-  .tour-fab:hover{background:rgba(255,255,255,.14);}
-  .tour-fab.gem-glow::after,.tour-fab.tour-glow::after{border-radius:999px;}
 
   .wordmark,.cards,.shortcuts{
     transition:opacity .55s ease, transform .7s cubic-bezier(.22,1,.36,1), max-height .7s ease, margin .7s ease, filter .55s ease;
@@ -726,7 +676,8 @@
     body.has-result .cluster{padding-top:max(52px, env(safe-area-inset-top, 0px) + 32px);}
   }
   @media (prefers-reduced-motion:reduce){
-    .stage-bg,.rays,.caustics{animation:none;}
+    .stage-bg.is-leave,.stage-bg.is-enter{animation:none;}
+    .rays,.caustics{animation:none;}
     .gem-glow::after,body.is-thinking .gem-glow{animation:none;}
     .query-pip.is-fly,.query-pip.is-settled{animation:none;opacity:1;transform:none;}
   }
@@ -747,7 +698,6 @@
 <header class="top">
   <a href="/" id="homeLink" class="gem-glow">Home</a>
   <a href="#ask" id="askLink" class="gem-glow">Ask</a>
-  <button class="tour-fab gem-glow" id="tourStart" type="button">Tour</button>
   <button class="icon-btn apps-btn gem-glow" id="appsBtn" type="button" aria-label="Open apps" aria-expanded="false">
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <circle cx="5" cy="5" r="1.7"/><circle cx="12" cy="5" r="1.7"/><circle cx="19" cy="5" r="1.7"/>
@@ -932,16 +882,6 @@
   </article>
 </div>
 
-<aside class="tour-card" id="tourCard" hidden aria-live="polite">
-  <p class="tour-kicker">Tour <span id="tourStepN">1</span> / <span id="tourStepT">1</span></p>
-  <h3 id="tourTitle">AquaAsk</h3>
-  <p id="tourBody"></p>
-  <div class="tour-actions">
-    <button class="ghost" type="button" id="tourSkip">Skip</button>
-    <button class="next" type="button" id="tourNext">Next</button>
-  </div>
-</aside>
-
 <script>
 (function(){
   var defaults = [
@@ -1028,17 +968,32 @@
   var slides = [].slice.call(document.querySelectorAll(".stage-bg"));
   if(slides.length > 1){
     var cur = 0;
+    var cycling = false;
     var reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     setInterval(function(){
+      if(cycling) return;
       var pick = cur;
       while(pick === cur) pick = Math.floor(Math.random()*slides.length);
-      slides[cur].classList.remove("is-on");
-      slides[pick].classList.add("is-on");
-      if(!reduceMotion){
-        slides[pick].style.animation = "none";
-        void slides[pick].offsetWidth;
-        slides[pick].style.animation = "";
+      var outgoing = slides[cur];
+      var incoming = slides[pick];
+      if(reduceMotion){
+        outgoing.classList.remove("is-on","is-leave","is-enter");
+        incoming.classList.add("is-on");
+        cur = pick;
+        return;
       }
+      cycling = true;
+      outgoing.classList.remove("is-on","is-enter");
+      incoming.classList.remove("is-on","is-leave");
+      outgoing.classList.add("is-leave");
+      incoming.classList.add("is-enter");
+      incoming.addEventListener("animationend", function done(){
+        incoming.removeEventListener("animationend", done);
+        outgoing.classList.remove("is-leave");
+        incoming.classList.remove("is-enter");
+        incoming.classList.add("is-on");
+        cycling = false;
+      });
       cur = pick;
     }, 5000);
   }
@@ -1444,7 +1399,6 @@
 })();
 </script>
 <script src="modes.js?v=globe2"></script>
-<script src="tour.js?v=1"></script>
 <script src="qrcode.min.js"></script>
 <script src="pwa.js?v=1"></script>
 <script src="agent-bridge.js"></script>
