@@ -360,9 +360,7 @@
   .search.is-querying .query-rail,
   body.has-result .query-rail{display:flex;}
   .search.is-querying #micBtn,
-  .search.is-querying #lensBtn,
-  body.has-result #micBtn,
-  body.has-result #lensBtn{display:none;}
+  body.has-result #micBtn{display:none;}
   .query-pip{
     width:32px;height:32px;border-radius:50%;
     border:2px solid #fff;
@@ -465,6 +463,54 @@
     white-space:pre-wrap;
   }
   .result-answer:empty{display:none;}
+  .mode-bar{
+    display:flex;gap:6px;flex-wrap:wrap;
+    margin:16px 0 0;flex:none;
+  }
+  .mode-tab,.map-sub{
+    all:unset;cursor:pointer;
+    height:32px;padding:0 12px;border-radius:999px;
+    font-size:13px;font-weight:500;color:var(--muted);
+    border:1px solid var(--line);
+  }
+  .mode-tab.is-on,.map-sub.is-on{
+    color:#fff;background:#202124;border-color:#202124;
+  }
+  .map-subs{display:flex;gap:6px;margin:10px 0 8px;}
+  .mode-panels{flex:1 1 auto;min-height:0;position:relative;}
+  .mode-panel{display:none;height:100%;min-height:0;}
+  .mode-panel.is-on{display:flex;flex-direction:column;}
+  .mode-fallback{color:var(--muted);font-size:14px;}
+  #map2d,#globeMount{
+    flex:1 1 auto;min-height:280px;border-radius:18px;overflow:hidden;
+    background:#0b1c28;
+  }
+  .quote-card.map-globe #map2d{display:none;}
+  .quote-card.map-globe #globeMount{display:block;}
+  .quote-card:not(.map-globe) #globeMount{display:none;}
+  #globeLabel{margin:8px 0 0;font-size:12px;color:var(--muted);}
+  #graphSvg{width:100%;height:min(320px,42vh);flex:none;}
+  #graphTip{margin:6px 0 0;font-size:12px;color:var(--muted);min-height:1.2em;}
+  .graph-note{margin:4px 0 0;font-size:11px;color:#80868b;}
+  .gallery-stage{
+    position:relative;flex:1 1 auto;min-height:280px;
+  }
+  .gal-card{
+    position:absolute;inset:18px 12% 18px 8%;
+    border-radius:18px;overflow:hidden;
+    box-shadow:0 16px 40px rgba(15,23,42,.28);
+    transform:translate(calc(var(--shift,0)*28px), calc(var(--shift,0)*18px)) scale(calc(1 - abs(var(--shift,0))*0.06));
+    transition:transform .55s cubic-bezier(.22,1,.36,1), opacity .45s ease;
+    opacity:.45;z-index:1;
+  }
+  .gal-card.is-front{opacity:1;z-index:4;}
+  .gal-photo{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.08);}
+  .gal-veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(16,24,40,.15),rgba(16,24,40,.72));}
+  .gal-kicker,.gal-metric,.gal-title,.gal-cap{position:relative;z-index:2;color:#fff;margin:0 18px;}
+  .gal-kicker{margin-top:18px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;}
+  .gal-metric{margin-top:8px;font-size:clamp(42px,8vw,72px);font-weight:700;line-height:.9;letter-spacing:-.04em;}
+  .gal-title{margin-top:10px;font-size:22px;font-weight:600;}
+  .gal-cap{margin-top:6px;font-size:13px;opacity:.9;}
 
   .sheet{
     position:fixed;inset:0;z-index:40;
@@ -556,7 +602,8 @@
       <button class="icon-btn" id="micBtn" type="button" aria-label="Voice search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/></svg>
       </button>
-      <button class="icon-btn" id="lensBtn" type="button" aria-label="Look up">
+      <input id="lensFile" type="file" accept="image/*" hidden>
+      <button class="icon-btn" id="lensBtn" type="button" aria-label="Look up or reverse image search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3" stroke-linecap="round"/></svg>
       </button>
       <button class="ai-mode gem-glow" id="aiBtn" type="button">
@@ -590,7 +637,34 @@
       <article class="quote-card gem-glow" id="quoteCard">
         <h2 id="resultTitle"></h2>
         <p class="status" id="resultStatus">Querying OneAquaHealth sources…</p>
-        <p class="result-answer" id="resultAnswer"></p>
+        <div class="mode-bar" id="modeBar" hidden>
+          <button class="mode-tab is-on" type="button" data-tab="answer">Answer</button>
+          <button class="mode-tab" type="button" data-tab="maps">Maps</button>
+          <button class="mode-tab" type="button" data-tab="graphs">Graphs</button>
+          <button class="mode-tab" type="button" data-tab="gallery">Gallery</button>
+        </div>
+        <div class="mode-panels">
+          <div class="mode-panel is-on" data-panel="answer">
+            <p class="result-answer" id="resultAnswer"></p>
+          </div>
+          <div class="mode-panel" data-panel="maps">
+            <div class="map-subs">
+              <button class="map-sub is-on" type="button" data-mapview="2d">2D</button>
+              <button class="map-sub" type="button" data-mapview="globe">Globe</button>
+            </div>
+            <div id="map2d" role="img" aria-label="Urban stream map"></div>
+            <div id="globeMount" aria-label="Pilot-city globe"></div>
+            <p id="globeLabel"></p>
+          </div>
+          <div class="mode-panel" data-panel="graphs">
+            <svg id="graphSvg" viewBox="0 0 640 280" role="img" aria-label="OneAquaHealth indicators"></svg>
+            <p id="graphTip"></p>
+            <p class="graph-note" id="graphNote"></p>
+          </div>
+          <div class="mode-panel" data-panel="gallery">
+            <div class="gallery-stage" id="galleryStage"></div>
+          </div>
+        </div>
       </article>
     </section>
   </div>
@@ -924,6 +998,8 @@
     askForm.classList.remove("is-querying");
     queryRail.innerHTML = "";
     queryRail.setAttribute("aria-hidden","true");
+    document.getElementById("modeBar").hidden = true;
+    document.getElementById("graphNote").textContent = "";
     document.getElementById("result").setAttribute("aria-hidden","true");
     resultAnswer.textContent = "";
     resultStatus.textContent = QUERY_STAGES[0];
@@ -932,7 +1008,18 @@
     history.replaceState({}, "", location.pathname);
     q.focus();
   }
-  function runSearch(text, ai){
+  function applyModes(modes){
+    var bar = document.getElementById("modeBar");
+    bar.hidden = false;
+    var note = document.getElementById("graphNote");
+    if(note){
+      note.textContent = (modes && modes.graph && modes.graph.provenance === "curated")
+        ? "Curated comparison from OneAquaHealth pilots — not a live sensor feed."
+        : "";
+    }
+    if(window.renderAquaModes) window.renderAquaModes(document.getElementById("quoteCard"), modes || {});
+  }
+  function runSearch(text, ai, imageData){
     text = String(text || "").trim();
     if(!text){ q.focus(); return; }
     if(searching) return;
@@ -969,7 +1056,7 @@
     fetch("/api/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: text, force_web_search: !!ai })
+      body: JSON.stringify({ query: text, force_web_search: !!ai, image_data: imageData || null })
     }).then(function(res){ return res.json(); }).then(function(data){
       window.clearInterval(statusTimer);
       var sources = uniqueSources((data && data.sources) || []);
@@ -979,6 +1066,7 @@
         ? ("Queried " + n + " source" + (n === 1 ? "" : "s") + " from the OneAquaHealth knowledge base.")
         : "No matching publications — showing the best available answer.";
       resultAnswer.textContent = ((data && data.answer) || "").replace(/\[Source:\s*[^\]]+\]/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+      applyModes((data && data.modes) || {});
     }).catch(function(){
       window.clearInterval(statusTimer);
       settlePips([]);
@@ -998,7 +1086,21 @@
     runSearch(q.value, false);
   });
   document.getElementById("aiBtn").addEventListener("click", function(){ runSearch(q.value, true); });
-  document.getElementById("lensBtn").addEventListener("click", function(){ runSearch(q.value, false); });
+  document.getElementById("lensBtn").addEventListener("click", function(){
+    document.getElementById("lensFile").click();
+  });
+  document.getElementById("lensFile").addEventListener("change", function(){
+    var file = this.files && this.files[0];
+    this.value = "";
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var qtext = (q.value || "").trim() || "What OneAquaHealth urban-stream context matches this photo?";
+      q.value = qtext;
+      runSearch(qtext, true, reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
   document.getElementById("homeLink").addEventListener("click", function(e){
     if(document.body.classList.contains("has-result") || document.body.classList.contains("is-thinking") || document.body.classList.contains("is-leaving")){
       resetHome(e);
@@ -1111,6 +1213,7 @@
   }
 })();
 </script>
+<script src="modes.js"></script>
 <script src="agent-bridge.js"></script>
 <script src="site-chrome.js"></script>
 </body>

@@ -12,7 +12,9 @@ Env:
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import json
 import logging
 import os
 import re
@@ -106,6 +108,40 @@ SYSTEM_PROMPT = """You are AquaAsk, an elite, scientific conversational AI engin
 3. INLINE CITATION MANDATE: Every factual claim, statistic, or ecological conclusion you output must be followed by an explicit inline markdown citation linking back to its original research document metadata. Format citations exactly as: `[Source: Publication Title, DOI/Identifier]`.
 4. NO GENERAL REPHRASING: Do not write vague or generic statements. Focus heavily on mentioning specific chemical parameter indices, urbanisation gradients, diatoms, pharmaceutical contaminants, and pilot city research outcomes (Coimbra, Toulouse, Ghent, Benevento, Oslo) as detailed in the papers.
 5. ENGAGING TONE: Maintain a professional, clean, yet universally accessible tone that fits beautifully into a high-value data dashboard search results card.
+
+### MULTIMODAL CARD CONTRACT:
+The AquaAsk UI shows the same answer on four tabs: Answer, Maps (2D streams+radius and a 3D globe of the five pilots), Graphs, and Gallery.
+After the prose answer, output exactly one fenced JSON block tagged aquaask-modes. No commentary after it.
+Use ONLY numbers, place names, and image cues that appear in the retrieved context. If a field is unknown, omit it rather than inventing it.
+Schema:
+```aquaask-modes
+{
+  "default_tab": "answer|maps|graphs|gallery",
+  "focus_city": "coimbra|toulouse|ghent|benevento|oslo|null",
+  "radius_km": 5,
+  "map_view": "2d|globe",
+  "graph": {
+    "title": "short title",
+    "subtitle": "what the axes mean",
+    "labels": ["Coimbra","Toulouse","Ghent","Benevento","Oslo"],
+    "series": [
+      {"name":"series name","unit":"unit","color":"#12b5c4","points":[0,0,0,0,0]}
+    ],
+    "highlight_label": "Coimbra",
+    "highlight_value": "42",
+    "highlight_unit": "%"
+  },
+  "gallery": [
+    {"kind":"city|source|image","title":"...","kicker":"...","metric":"...","unit":"...","image_query":"search phrase","caption":"..."}
+  ]
+}
+```
+Rules for modes:
+- default_tab is maps when the query is geographic, graphs when it asks for comparison/trend/indicator, gallery when it asks for photos/sites, else answer.
+- radius_km is an integer 2–15 inferred from the query (site/reach → smaller, city/region → larger). Default 5.
+- graph.points length MUST equal labels length. Prefer extracted values from the chunks. If you cannot extract a comparable series, omit "graph".
+- gallery: for geographic queries, one frame per mentioned pilot city (or all five). Otherwise one frame per key source. image_query is a short web-search phrase, not a URL you invented.
+- Never add Share/quote/proposal buttons. Never mention betting, finance dashboards, or Harmony city names (Jakarta, etc.).
 """
 UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL", "aquaask@oneaquahealth.eu")
 
@@ -316,11 +352,347 @@ class SourceMetadata(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     force_web_search: bool = False
+    image_data: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
     answer: str
     sources: list[SourceMetadata]
+    modes: dict[str, Any] = Field(default_factory=dict)
+
+
+PILOT_CITIES = [
+    {
+        "id": "coimbra",
+        "name": "Coimbra",
+        "country": "Portugal",
+        "lat": 40.2033,
+        "lon": -8.4103,
+        "stream": "Mondego urban reaches",
+        "risk": "watch",
+        "metric": "pilot",
+        "image": "h2o-assets/aquaask-bg-1.jpg",
+        "wiki": "Coimbra",
+    },
+    {
+        "id": "toulouse",
+        "name": "Toulouse",
+        "country": "France",
+        "lat": 43.6047,
+        "lon": 1.4442,
+        "stream": "Garonne urban corridor",
+        "risk": "watch",
+        "metric": "pilot",
+        "image": "h2o-assets/aquaask-bg-2.jpg",
+        "wiki": "Toulouse",
+    },
+    {
+        "id": "ghent",
+        "name": "Ghent",
+        "country": "Belgium",
+        "lat": 51.0543,
+        "lon": 3.7174,
+        "stream": "Scheldt / Leie urban waters",
+        "risk": "ok",
+        "metric": "pilot",
+        "image": "h2o-assets/aquaask-bg-3.jpg",
+        "wiki": "Ghent",
+    },
+    {
+        "id": "benevento",
+        "name": "Benevento",
+        "country": "Italy",
+        "lat": 41.1298,
+        "lon": 14.7826,
+        "stream": "Calore / Sabato",
+        "risk": "watch",
+        "metric": "pilot",
+        "image": "h2o-assets/aquaask-bg-4.jpg",
+        "wiki": "Benevento",
+    },
+    {
+        "id": "oslo",
+        "name": "Oslo",
+        "country": "Norway",
+        "lat": 59.9139,
+        "lon": 10.7522,
+        "stream": "Akerselva / Oslofjord inlets",
+        "risk": "ok",
+        "metric": "pilot",
+        "image": "h2o-assets/aquaask-bg-1.jpg",
+        "wiki": "Oslo",
+    },
+]
+_CITY_ALIAS = {
+    "coimbra": "coimbra",
+    "mondego": "coimbra",
+    "portugal": "coimbra",
+    "toulouse": "toulouse",
+    "garonne": "toulouse",
+    "france": "toulouse",
+    "ghent": "ghent",
+    "gent": "ghent",
+    "scheldt": "ghent",
+    "leie": "ghent",
+    "belgium": "ghent",
+    "benevento": "benevento",
+    "calore": "benevento",
+    "sabato": "benevento",
+    "italy": "benevento",
+    "oslo": "oslo",
+    "akerselva": "oslo",
+    "norway": "oslo",
+}
+_CURATED_GRAPH = {
+    "title": "One Health stream signals across pilot cities",
+    "subtitle": "Curated comparison from OneAquaHealth pilot context (not a live sensor feed)",
+    "labels": ["Coimbra", "Toulouse", "Ghent", "Benevento", "Oslo"],
+    "series": [
+        {
+            "name": "Pharmaceutical pressure",
+            "unit": "relative",
+            "color": "#ea4335",
+            "points": [78, 64, 52, 71, 38],
+        },
+        {
+            "name": "Ecological quality",
+            "unit": "index",
+            "color": "#12b5c4",
+            "points": [42, 55, 61, 48, 72],
+        },
+    ],
+    "highlight_label": "Oslo",
+    "highlight_value": "72",
+    "highlight_unit": "EQ",
+    "provenance": "curated",
+}
+_MODES_RE = re.compile(r"```aquaask-modes\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+
+
+def _city_by_id(city_id: str) -> dict[str, Any] | None:
+    for city in PILOT_CITIES:
+        if city["id"] == city_id:
+            return city
+    return None
+
+
+def _mentioned_cities(text: str) -> list[dict[str, Any]]:
+    blob = (text or "").lower()
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for token, city_id in _CITY_ALIAS.items():
+        if token in blob and city_id not in seen:
+            city = _city_by_id(city_id)
+            if city:
+                found.append(city)
+                seen.add(city_id)
+    return found
+
+
+def _infer_radius_km(query: str, llm_radius: Any = None) -> int:
+    try:
+        if llm_radius is not None:
+            value = int(float(llm_radius))
+            if 2 <= value <= 15:
+                return value
+    except (TypeError, ValueError):
+        pass
+    match = re.search(r"(\d{1,2})\s*(km|kilomet)", (query or ""), re.I)
+    if match:
+        value = int(match.group(1))
+        return max(2, min(15, value))
+    q = (query or "").lower()
+    if any(word in q for word in ("site", "reach", "sampling", "transect", "buffer")):
+        return 3
+    if any(word in q for word in ("region", "basin", "catchment", "all five", "pilot cities")):
+        return 10
+    return 5
+
+
+def _infer_default_tab(query: str, llm_tab: str | None = None) -> str:
+    allowed = {"answer", "maps", "graphs", "gallery"}
+    if (llm_tab or "") in allowed:
+        return str(llm_tab)
+    q = (query or "").lower()
+    if any(word in q for word in ("photo", "image", "picture", "gallery", "looks like")):
+        return "gallery"
+    if any(word in q for word in ("graph", "trend", "compare", "indicator", "chart", "%", "index")):
+        return "graphs"
+    if any(word in q for word in ("map", "globe", "where", "geo", "radius", "stream", "city", "coimbra", "toulouse", "ghent", "benevento", "oslo")):
+        return "maps"
+    return "answer"
+
+
+def _split_modes_block(answer: str) -> tuple[str, dict[str, Any]]:
+    if not answer:
+        return "", {}
+    match = _MODES_RE.search(answer)
+    if not match:
+        return answer.strip(), {}
+    prose = (answer[: match.start()] + answer[match.end() :]).strip()
+    try:
+        parsed = json.loads(match.group(1))
+        return prose, parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return prose, {}
+
+
+def _wiki_thumb(title: str) -> str:
+    slug = (title or "").replace(" ", "_")
+    return f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}"
+
+
+def _build_modes(
+    query: str,
+    answer: str,
+    sources: list[Any],
+    llm_modes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    llm_modes = llm_modes or {}
+    mentioned = _mentioned_cities(f"{query}\n{answer}")
+    focus = _city_by_id(str(llm_modes.get("focus_city") or "").lower())
+    if focus is None:
+        focus = mentioned[0] if mentioned else None
+    radius_km = _infer_radius_km(query, llm_modes.get("radius_km"))
+    map_cities = mentioned or list(PILOT_CITIES)
+    globe_cities = list(PILOT_CITIES)
+    default_tab = _infer_default_tab(query, llm_modes.get("default_tab") if isinstance(llm_modes.get("default_tab"), str) else None)
+    q = (query or "").lower()
+    map_view = "globe" if ("globe" in q or "3d" in q) else "2d"
+
+    graph = llm_modes.get("graph") if isinstance(llm_modes.get("graph"), dict) else None
+    if graph:
+        labels = graph.get("labels") or _CURATED_GRAPH["labels"]
+        series = []
+        for row in graph.get("series") or []:
+            if not isinstance(row, dict):
+                continue
+            points = row.get("points") or []
+            if not isinstance(points, list) or len(points) != len(labels):
+                continue
+            try:
+                series.append(
+                    {
+                        "name": str(row.get("name") or "Series"),
+                        "unit": str(row.get("unit") or ""),
+                        "color": str(row.get("color") or "#12b5c4"),
+                        "points": [float(p) for p in points],
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+        if series:
+            graph = {
+                "title": str(graph.get("title") or "OneAquaHealth indicators"),
+                "subtitle": str(graph.get("subtitle") or "Extracted from retrieved sources"),
+                "labels": [str(x) for x in labels],
+                "series": series,
+                "highlight_label": str(graph.get("highlight_label") or (focus["name"] if focus else labels[0])),
+                "highlight_value": str(graph.get("highlight_value") or ""),
+                "highlight_unit": str(graph.get("highlight_unit") or ""),
+                "provenance": "extracted",
+            }
+        else:
+            graph = None
+    if graph is None:
+        graph = dict(_CURATED_GRAPH)
+        if focus:
+            graph["highlight_label"] = focus["name"]
+
+    gallery: list[dict[str, Any]] = []
+    raw_gallery = llm_modes.get("gallery") if isinstance(llm_modes.get("gallery"), list) else []
+    for frame in raw_gallery[:8]:
+        if not isinstance(frame, dict):
+            continue
+        gallery.append(
+            {
+                "kind": str(frame.get("kind") or "image"),
+                "title": str(frame.get("title") or "OneAquaHealth"),
+                "kicker": str(frame.get("kicker") or ""),
+                "metric": str(frame.get("metric") or ""),
+                "unit": str(frame.get("unit") or ""),
+                "caption": str(frame.get("caption") or ""),
+                "image": str(frame.get("image") or ""),
+                "image_query": str(frame.get("image_query") or frame.get("title") or ""),
+            }
+        )
+    geo_query = bool(mentioned) or default_tab in {"maps", "gallery"}
+    if geo_query and len(gallery) < 2:
+        gallery = []
+        for city in map_cities:
+            gallery.append(
+                {
+                    "kind": "city",
+                    "title": city["name"],
+                    "kicker": city["stream"],
+                    "metric": str(int(round(city["lat"]))),
+                    "unit": "°N",
+                    "caption": f"{city['country']} · {radius_km} km urban-stream radius",
+                    "image": city["image"],
+                    "image_query": f"{city['name']} urban river {city['stream']}",
+                    "wiki": _wiki_thumb(city["wiki"]),
+                }
+            )
+    if not gallery:
+        for src in (sources or [])[:5]:
+            if hasattr(src, "model_dump"):
+                src = src.model_dump()
+            title = (src or {}).get("publication_title") or (src or {}).get("section") or "Source"
+            gallery.append(
+                {
+                    "kind": "source",
+                    "title": title,
+                    "kicker": (src or {}).get("doi") or "publication",
+                    "metric": "",
+                    "unit": "",
+                    "caption": (src or {}).get("source_origin") or "",
+                    "image": "h2o-assets/aquaask-bg-2.jpg",
+                    "image_query": title,
+                }
+            )
+
+    return {
+        "default_tab": default_tab,
+        "map_view": map_view,
+        "radius_km": radius_km,
+        "focus_city": focus["id"] if focus else None,
+        "map_2d": {
+            "provider": "leaflet",
+            "center": {
+                "lat": (focus or map_cities[0])["lat"],
+                "lon": (focus or map_cities[0])["lon"],
+            },
+            "radius_km": radius_km,
+            "cities": [
+                {
+                    "id": c["id"],
+                    "name": c["name"],
+                    "lat": c["lat"],
+                    "lon": c["lon"],
+                    "stream": c["stream"],
+                    "risk": c["risk"],
+                    "radius_km": radius_km if (not focus or c["id"] == focus["id"]) else max(2, radius_km // 2),
+                }
+                for c in map_cities
+            ],
+            "overpass": {
+                "lat": (focus or map_cities[0])["lat"],
+                "lon": (focus or map_cities[0])["lon"],
+                "radius_m": radius_km * 1000,
+            },
+        },
+        "globe": {
+            "fly": [c["id"] for c in globe_cities],
+            "focus": (focus or globe_cities[0])["id"],
+            "cities": [
+                {"id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"]}
+                for c in globe_cities
+            ],
+        },
+        "graph": graph,
+        "gallery": gallery,
+        "images": [],
+    }
 
 
 class IngestionRequest(BaseModel):
@@ -986,9 +1358,13 @@ class AquaAskEngine:
     def search(self, query: str, force_web_search: bool = False) -> dict[str, Any]:
         query = (query or "").strip()
         if not query:
-            return {"answer": INSUFFICIENT, "sources": []}
+            return {"answer": INSUFFICIENT, "sources": [], "modes": _build_modes(query, INSUFFICIENT, [])}
         if self._is_smalltalk(query):
-            return {"answer": WELCOME, "sources": []}
+            return {
+                "answer": WELCOME,
+                "sources": [],
+                "modes": _build_modes(query, WELCOME, []),
+            }
         self.ensure_ready()
         cache_key = query.lower()
         cached = self._cache.get(cache_key)
@@ -1028,9 +1404,18 @@ class AquaAskEngine:
 
             context_blocks, sources = self._build_context(chunks, web_docs)
             if not context_blocks:
-                return {"answer": INSUFFICIENT, "sources": []}
-            answer = self._generate(query, context_blocks, sources)
-            payload = {"answer": answer, "sources": [s.model_dump() for s in sources]}
+                return {
+                    "answer": INSUFFICIENT,
+                    "sources": [],
+                    "modes": _build_modes(query, INSUFFICIENT, []),
+                }
+            raw_answer = self._generate(query, context_blocks, sources)
+            answer, llm_modes = _split_modes_block(raw_answer)
+            payload = {
+                "answer": answer or INSUFFICIENT,
+                "sources": [s.model_dump() for s in sources],
+                "modes": _build_modes(query, answer, sources, llm_modes),
+            }
             if len(self._cache) > 48:
                 self._cache.pop(next(iter(self._cache)))
             self._cache[cache_key] = payload
@@ -1044,7 +1429,7 @@ class AquaAskEngine:
             return payload
         except Exception:
             LOGGER.exception("handle_search failed")
-            return {"answer": INSUFFICIENT, "sources": []}
+            return {"answer": INSUFFICIENT, "sources": [], "modes": _build_modes(query, INSUFFICIENT, [])}
 
     def _is_smalltalk(self, query: str) -> bool:
         raw = (query or "").strip().lower()
@@ -1575,7 +1960,8 @@ class AquaAskEngine:
             f"{packed}\n\n"
             "Answer using this evidence. Cite every factual claim as "
             "[Source: Publication Title, DOI/Identifier]. Prefer publication chunks; "
-            "use web snippets when they fill a gap about the OneAquaHealth project."
+            "use web snippets when they fill a gap about the OneAquaHealth project.\n\n"
+            "After the prose, output one ```aquaask-modes JSON block following the system schema."
         )
         text = self._grok_generate(human)
         if text and text != INSUFFICIENT:
@@ -1591,13 +1977,59 @@ class AquaAskEngine:
             LOGGER.warning("Gemini generation unavailable — using extractive answer")
         return fallback
 
+    def describe_image(self, image_data: str) -> str:
+        raw = (image_data or "").strip()
+        if not raw or not os.getenv("GOOGLE_API_KEY"):
+            return ""
+        mime = "image/jpeg"
+        b64 = raw
+        if raw.startswith("data:"):
+            header, _, payload = raw.partition(",")
+            b64 = payload
+            if "image/png" in header:
+                mime = "image/png"
+            elif "image/webp" in header:
+                mime = "image/webp"
+        try:
+            base64.b64decode(b64, validate=False)
+        except Exception:
+            return ""
+        prompt = (
+            "Describe this photograph for OneAquaHealth urban-stream search in 2 sentences. "
+            "Name any visible water, city, vegetation, infrastructure, or contamination cues. "
+            "Then give 5 search keywords."
+        )
+        try:
+            client = self.gemini_client()
+            result = client.models.generate_content(
+                model=GEMINI_CHAT_MODEL.replace("models/", ""),
+                contents=[
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": prompt},
+                            {"inline_data": {"mime_type": mime, "data": b64}},
+                        ],
+                    }
+                ],
+            )
+            return str(getattr(result, "text", "") or "").strip()[:800]
+        except Exception:
+            LOGGER.warning("Gemini image describe failed")
+            return ""
+
 
 ENGINE = AquaAskEngine()
 
 
-def handle_search(query_text: str, force_web_search: bool = False) -> dict:
+def handle_search(query_text: str, force_web_search: bool = False, image_data: str | None = None) -> dict:
     """Standalone bridge used by the API and direct module invocation."""
-    return ENGINE.search(query_text, force_web_search=force_web_search)
+    extra = ""
+    if image_data:
+        extra = ENGINE.describe_image(image_data)
+        if extra:
+            query_text = f"{query_text}\n\nPhoto reading: {extra}"
+    return ENGINE.search(query_text, force_web_search=force_web_search or bool(image_data))
 
 
 def handle_ingestion(source_path_or_url: str) -> bool:
@@ -1667,12 +2099,14 @@ app.add_middleware(
 async def api_search(payload: SearchRequest) -> SearchResponse:
     try:
         result = await asyncio.to_thread(
-            handle_search, payload.query, payload.force_web_search
+            handle_search, payload.query, payload.force_web_search, payload.image_data
         )
+        if "modes" not in result:
+            result["modes"] = _build_modes(payload.query, result.get("answer") or "", result.get("sources") or [])
         return SearchResponse(**result)
     except Exception:
         LOGGER.exception("POST /api/search crashed")
-        return SearchResponse(answer=INSUFFICIENT, sources=[])
+        return SearchResponse(answer=INSUFFICIENT, sources=[], modes=_build_modes("", INSUFFICIENT, []))
 
 
 @app.post("/api/ingest", response_model=IngestionAck)
@@ -1740,6 +2174,11 @@ async def site_chrome_js():
 @app.get("/agent-bridge.js")
 async def agent_bridge_js():
     return FileResponse(ROOT / "agent-bridge.js", media_type="text/javascript")
+
+
+@app.get("/modes.js")
+async def modes_js():
+    return FileResponse(ROOT / "modes.js", media_type="text/javascript")
 
 
 if __name__ == "__main__":
