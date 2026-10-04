@@ -786,7 +786,8 @@
     <nav class="site-nav" aria-label="AquaAsk">
       <a class="nav-brand" href="/">AQUAASK</a>
       <div class="nav-links">
-        <a href="/" class="is-on">Ask</a>
+        <a href="/">Home</a>
+        <a href="aquaask.html" class="is-on">Ask</a>
         <a href="#library">Library</a>
         <a href="#sources">Sources</a>
         <a href="#pulse">Pulse</a>
@@ -800,7 +801,8 @@
       </div>
     </nav>
     <div class="nav-mobile" id="navMobile">
-      <a href="/">Ask</a>
+      <a href="/">Home</a>
+      <a href="aquaask.html">Ask</a>
       <a href="#library">Library</a>
       <a href="#sources">Sources</a>
       <a href="#pulse">Pulse</a>
@@ -826,7 +828,7 @@
           <circle cx="11" cy="11" r="7"/>
           <path d="m20 20-3.2-3.2"/>
         </svg>
-        <input id="askInput" type="search" name="q" placeholder="Ask AquaAsk anything about water, pace, or the bottle…" autocomplete="off" autofocus>
+        <input id="askInput" type="search" name="q" placeholder="Ask AquaAsk about OneAquaHealth" autocomplete="off" autofocus>
       </div>
       <button class="ask-btn" type="submit">ASK</button>
       <button class="ai-btn" id="aiBtn" type="button" aria-label="AI mode" aria-pressed="false" title="AI">
@@ -837,7 +839,7 @@
         </svg>
       </button>
     </form>
-    <p class="hint">Hydration · pace · Terra · the bottle</p>
+    <p class="hint">OneAquaHealth · urban streams · One Health</p>
 
     <article class="fish-card" id="answer" aria-live="polite">
       <div class="fish-inner">
@@ -1389,11 +1391,29 @@
       showToast(aiOn ? "AI mode on." : "AI mode off.");
       if(input){
         input.placeholder = aiOn
-          ? "Ask the model — hydration, pace, Terra, the bottle…"
-          : "Ask AquaAsk anything about water, pace, or the bottle…";
+          ? "Ask with live web search…"
+          : "Ask AquaAsk about OneAquaHealth";
         input.focus();
       }
     });
+  }
+
+  var preset = "";
+  var aiPreset = false;
+  try{
+    var incoming = new URLSearchParams(location.search);
+    preset = (incoming.get("q") || "").trim();
+    aiPreset = incoming.get("ai") === "1";
+  }catch(err){}
+  if(aiPreset && aiBtn){
+    aiOn = true;
+    aiBtn.classList.add("is-on");
+    aiBtn.setAttribute("aria-pressed", "true");
+    if(input) input.placeholder = "Ask with live web search…";
+  }
+  if(preset && input){
+    input.value = preset;
+    runSearch(preset);
   }
 
   if(form){
@@ -1442,5 +1462,7 @@
   })();
 })();
 </script>
+<script src="agent-bridge.js"></script>
+<script src="site-chrome.js"></script>
 </body>
 </html>

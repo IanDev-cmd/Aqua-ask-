@@ -34,6 +34,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from agent_bridge import router as agent_router
+
 try:
     from dotenv import load_dotenv
 
@@ -1651,6 +1653,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="AquaAsk RAG", version="1.0.0", lifespan=lifespan)
+app.include_router(agent_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -1707,12 +1710,33 @@ async def health():
 
 
 @app.get("/")
+@app.get("/index.html")
+async def home_page():
+    page = ROOT / "index.html"
+    if page.is_file():
+        return FileResponse(page)
+    ask = ROOT / "aquaask.html"
+    if ask.is_file():
+        return FileResponse(ask)
+    return {"service": "aquaask-rag", "docs": "/docs", "url": PUBLIC_APP_URL, "repo": GITHUB_REPO_URL}
+
+
 @app.get("/aquaask.html")
-async def root_page():
+async def ask_page():
     page = ROOT / "aquaask.html"
     if page.is_file():
         return FileResponse(page)
     return {"service": "aquaask-rag", "docs": "/docs", "url": PUBLIC_APP_URL, "repo": GITHUB_REPO_URL}
+
+
+@app.get("/site-chrome.js")
+async def site_chrome_js():
+    return FileResponse(ROOT / "site-chrome.js", media_type="text/javascript")
+
+
+@app.get("/agent-bridge.js")
+async def agent_bridge_js():
+    return FileResponse(ROOT / "agent-bridge.js", media_type="text/javascript")
 
 
 if __name__ == "__main__":
