@@ -61,8 +61,12 @@
     }
   }
 
-  function overpass(lat, lon, radiusM) {
-    var q = "[out:json][timeout:8];way[\"waterway\"~\"river|stream|canal\"](around:" + Math.round(radiusM) + "," + lat + "," + lon + ");out geom;";
+  function overpassCities(cities, radiusM) {
+    var parts = (cities || []).map(function (c) {
+      return 'way["waterway"~"river|stream|canal"](around:' + Math.round(radiusM) + "," + c.lat + "," + c.lon + ");";
+    }).join("");
+    if (!parts) return Promise.resolve({ elements: [] });
+    var q = "[out:json][timeout:12];(" + parts + ");out geom;";
     return fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       body: q,
@@ -80,37 +84,47 @@
         window.__aquaMap = null;
       }
       el.innerHTML = "";
-      var map = L.map(el, { zoomControl: true, attributionControl: false }).setView([center.lat, center.lon], 12);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
+      var map = L.map(el, { zoomControl: true, attributionControl: true }).setView([center.lat, center.lon], 13);
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19,
+        attribution: "Esri World Imagery"
+      }).addTo(map);
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19,
+        opacity: 0.9
+      }).addTo(map);
       window.__aquaMap = map;
+      var geoLayer = L.layerGroup().addTo(map);
+      var bounds = [];
       cities.forEach(function (city) {
         var r = (city.radius_km || spec.radius_km || 5) * 1000;
+        bounds.push([city.lat, city.lon]);
         L.circle([city.lat, city.lon], {
           radius: r,
-          color: city.risk === "ok" ? "#12b5c4" : "#f9ab00",
+          color: "#7ec8f0",
           weight: 2,
-          fillColor: city.risk === "ok" ? "#12b5c4" : "#f9ab00",
+          fillColor: "#0ba6ff",
           fillOpacity: 0.12
-        }).addTo(map);
+        }).addTo(geoLayer);
         L.circleMarker([city.lat, city.lon], {
           radius: 8,
           color: "#fff",
           weight: 2,
-          fillColor: "#1a73e8",
+          fillColor: "#0ba6ff",
           fillOpacity: 1
-        }).addTo(map).bindPopup("<strong>" + city.name + "</strong><br>" + (city.stream || "") + "<br>" + (city.radius_km || spec.radius_km) + " km radius");
+        }).addTo(geoLayer).bindPopup("<strong>" + city.name + "</strong><br>" + (city.stream || "") + "<br>" + (city.radius_km || spec.radius_km) + " km radius");
       });
-      var op = spec.overpass;
-      if (op && op.lat) {
-        overpass(op.lat, op.lon, op.radius_m || 5000).then(function (data) {
-          (data.elements || []).forEach(function (way) {
-            var latlngs = (way.geometry || []).map(function (g) { return [g.lat, g.lon]; });
-            if (latlngs.length > 1) {
-              L.polyline(latlngs, { color: "#1a73e8", weight: 3, opacity: 0.85 }).addTo(map);
-            }
-          });
-        });
+      if (bounds.length > 1) {
+        map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
       }
+      overpassCities(cities.length ? cities : [{ lat: center.lat, lon: center.lon }], (spec.radius_km || 5) * 1000).then(function (data) {
+        (data.elements || []).forEach(function (way) {
+          var latlngs = (way.geometry || []).map(function (g) { return [g.lat, g.lon]; });
+          if (latlngs.length > 1) {
+            L.polyline(latlngs, { color: "#7ec8f0", weight: 3.2, opacity: 0.95 }).addTo(geoLayer);
+          }
+        });
+      });
       window.setTimeout(function () { map.invalidateSize(); }, 200);
     }).catch(function () {
       el.innerHTML = "<p class='mode-fallback'>Map tiles could not load.</p>";
@@ -133,47 +147,58 @@
     globe.renderer.setSize(w, h, false);
   }
 
-  function flyGlobe(city) {
-    if (!globe.spin || !city) return;
-    var targetY = -(city.lon * Math.PI / 180);
-    var targetX = (city.lat * Math.PI / 180) * 0.35;
-    var startY = globe.spin.rotation.y;
-    var startX = globe.tilt.rotation.x;
-    var t0 = performance.now();
-    function step(now) {
-      var p = Math.min(1, (now - t0) / 1400);
-      var e = 1 - Math.pow(1 - p, 3);
-      globe.spin.rotation.y = startY + (targetY - startY) * e;
-      globe.tilt.rotation.x = startX + (targetX - startX) * e;
-      if (p < 1) requestAnimationFrame(step);
-    }
-    requestAnimationFrame(step);
-  }
-
   function drawGlobe(mount, modes) {
     var cities = ((modes && modes.globe) || {}).cities || [];
     var focusId = ((modes && modes.globe) || {}).focus;
     three().then(function () {
       var THREE = window.THREE;
+      if (globe.ready && globe.scene && globe.scene.background) {
+        if (globe.raf) cancelAnimationFrame(globe.raf);
+        if (globe.renderer && globe.renderer.domElement && globe.renderer.domElement.parentNode) {
+          globe.renderer.domElement.parentNode.removeChild(globe.renderer.domElement);
+        }
+        globe.ready = false;
+      }
       if (!globe.ready) {
         mount.innerHTML = "";
         var scene = new THREE.Scene();
+        scene.background = null;
         var camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-        camera.position.set(0, 0.08, 5.6);
+        camera.position.set(0, 0.1, 5.85);
         var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setClearColor(0x000000, 0);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+        renderer.domElement.style.width = "100%";
+        renderer.domElement.style.height = "100%";
+        renderer.domElement.style.display = "block";
         mount.appendChild(renderer.domElement);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        var key = new THREE.DirectionalLight(0xffffff, 0.7);
-        key.position.set(1.1, 0.8, 4);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+        var key = new THREE.DirectionalLight(0xffffff, 0.75);
+        key.position.set(1.2, 0.9, 4.0);
         scene.add(key);
+        var rim = new THREE.DirectionalLight(0xbfe9ff, 0.38);
+        rim.position.set(-3.2, -2.0, 1.2);
+        scene.add(rim);
+        scene.add(new THREE.HemisphereLight(0xdff4ff, 0x2f8fd6, 0.22));
         var tilt = new THREE.Group();
         tilt.rotation.z = -16 * Math.PI / 180;
+        tilt.rotation.x = 5 * Math.PI / 180;
         scene.add(tilt);
         var spin = new THREE.Group();
+        spin.rotation.y = 2.45;
         tilt.add(spin);
-        var mat = new THREE.MeshPhongMaterial({ shininess: 8, specular: 0x2a5f8c, emissive: 0xffffff, emissiveIntensity: 0.22 });
-        spin.add(new THREE.Mesh(new THREE.SphereGeometry(2, 40, 40), mat));
+        var mat = new THREE.MeshPhongMaterial({ shininess: 10, specular: 0x2a5f8c, emissive: 0xffffff, emissiveIntensity: 0.28 });
+        spin.add(new THREE.Mesh(new THREE.SphereGeometry(2, 48, 48), mat));
+        var fres = new THREE.ShaderMaterial({
+          uniforms: { c: { value: 0.17 }, p: { value: 4.2 }, glow: { value: new THREE.Color(0xa8e4ff) } },
+          vertexShader: "varying vec3 vN; varying vec3 vP; void main(){ vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0); vP=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }",
+          fragmentShader: "uniform float c; uniform float p; uniform vec3 glow; varying vec3 vN; varying vec3 vP; void main(){ float i=pow(c-dot(vN,vP),p); gl_FragColor=vec4(glow,1.0)*clamp(i,0.0,1.0); }",
+          side: THREE.BackSide,
+          blending: THREE.AdditiveBlending,
+          transparent: true,
+          depthWrite: false
+        });
+        spin.add(new THREE.Mesh(new THREE.SphereGeometry(2.28, 32, 32), fres));
         var loader = new THREE.TextureLoader();
         loader.crossOrigin = "anonymous";
         loader.load(
@@ -181,6 +206,7 @@
           function (tex) {
             mat.map = tex;
             mat.emissiveMap = tex;
+            mat.emissiveIntensity = 0.30;
             mat.needsUpdate = true;
           }
         );
@@ -193,7 +219,7 @@
         globe.ready = true;
         function tick() {
           globe.raf = requestAnimationFrame(tick);
-          if (globe.spin) globe.spin.rotation.y += 0.0016;
+          if (globe.spin) globe.spin.rotation.y += 0.0044;
           renderer.render(scene, camera);
         }
         tick();
@@ -206,7 +232,7 @@
       cities.forEach(function (city) {
         var dir = latLonToDir(city.lat, city.lon);
         var dot = new window.THREE.Mesh(
-          new window.THREE.SphereGeometry(0.045, 10, 10),
+          new window.THREE.SphereGeometry(0.05, 10, 10),
           new window.THREE.MeshBasicMaterial({ color: city.id === focusId ? 0xea4335 : 0xfbbc05 })
         );
         dot.position.set(dir.x * 2.04, dir.y * 2.04, dir.z * 2.04);
@@ -214,19 +240,11 @@
         globe.markers.push(dot);
       });
       resizeGlobe();
-      var focus = cities.filter(function (c) { return c.id === focusId; })[0] || cities[0];
-      var i = 0;
-      function cycle() {
-        if (!document.getElementById("globeMount")) return;
-        var city = cities[i % cities.length];
-        flyGlobe(city);
-        var label = document.getElementById("globeLabel");
-        if (label) label.textContent = city.name + " · OneAquaHealth pilot";
-        i += 1;
+      var label = document.getElementById("globeLabel");
+      if (label) {
+        var names = cities.map(function (c) { return c.name; }).join(" · ");
+        label.textContent = names || "OneAquaHealth pilots";
       }
-      cycle();
-      window.clearInterval(window.__aquaGlobeCycle);
-      window.__aquaGlobeCycle = window.setInterval(cycle, 3200);
     }).catch(function () {
       mount.innerHTML = "<p class='mode-fallback'>Globe could not load.</p>";
     });
@@ -323,21 +341,21 @@
     }
     frames.forEach(function (frame, i) {
       var card = document.createElement("article");
-      card.className = "gal-card" + (i === 0 ? " is-front" : "");
-      card.style.setProperty("--i", String(i));
-      var img = frame.image || "h2o-assets/aquaask-bg-1.jpg";
+      card.className = "gal-card";
+      var img = frame.image || "";
       card.innerHTML =
-        '<div class="gal-photo" style="background-image:url(\'' + img + '\')"></div>' +
+        '<img class="gal-photo" alt="" referrerpolicy="no-referrer">' +
         '<div class="gal-veil"></div>' +
-        '<p class="gal-kicker"></p><p class="gal-metric"></p><h3 class="gal-title"></h3><p class="gal-cap"></p>';
+        '<p class="gal-kicker"></p><h3 class="gal-title"></h3><p class="gal-cap"></p>';
+      var photo = card.querySelector(".gal-photo");
+      if (img && /^https?:/i.test(img)) photo.src = img;
       card.querySelector(".gal-kicker").textContent = frame.kicker || frame.kind || "";
-      card.querySelector(".gal-metric").textContent = ((frame.metric || "") + (frame.unit ? " " + frame.unit : "")).trim();
       card.querySelector(".gal-title").textContent = frame.title || "";
       card.querySelector(".gal-cap").textContent = frame.caption || "";
-      if (frame.wiki) {
-        fetch(frame.wiki).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
-          var src = data && data.thumbnail && data.thumbnail.source;
-          if (src) card.querySelector(".gal-photo").style.backgroundImage = "url('" + src + "')";
+      if (!photo.src && frame.wiki_title) {
+        fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(frame.wiki_title)).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+          var src = data && ((data.originalimage && data.originalimage.source) || (data.thumbnail && data.thumbnail.source));
+          if (src) photo.src = src;
         }).catch(function () {});
       }
       stage.appendChild(card);
@@ -345,19 +363,29 @@
     var idx = 0;
     function show(n) {
       var cards = stage.querySelectorAll(".gal-card");
+      var total = cards.length;
       cards.forEach(function (c, i) {
-        c.classList.toggle("is-front", i === n);
-        c.style.setProperty("--shift", String(i - n));
+        c.classList.remove("is-front", "is-next", "is-prev");
+        if (i === n) {
+          c.classList.add("is-front");
+          c.style.order = "0";
+        } else if (i === (n + 1) % total) {
+          c.classList.add("is-next");
+          c.style.order = "1";
+        } else if (i === (n - 1 + total) % total) {
+          c.classList.add("is-prev");
+          c.style.order = "2";
+        }
       });
       idx = n;
     }
     show(0);
     function next() { show((idx + 1) % frames.length); }
-    galleryTimer = window.setInterval(next, 3400);
+    galleryTimer = window.setInterval(next, 3800);
     stage.onmouseenter = function () { window.clearInterval(galleryTimer); };
     stage.onmouseleave = function () {
       window.clearInterval(galleryTimer);
-      galleryTimer = window.setInterval(next, 3400);
+      galleryTimer = window.setInterval(next, 3800);
     };
     stage.onclick = function () { next(); };
   }
@@ -365,10 +393,9 @@
   window.renderAquaModes = function (root, modes) {
     if (!root) return;
     modes = modes || {};
-    setTab(root, modes.default_tab || "answer");
-    root.querySelectorAll(".mode-tab").forEach(function (btn) {
-      btn.onclick = function () { setTab(root, btn.getAttribute("data-tab")); };
-    });
+    var startTab = modes.default_tab || "answer";
+    setTab(root, startTab);
+    document.body.classList.toggle("is-maps-tab", startTab === "maps");
     var map2d = root.querySelector("#map2d");
     var globeMount = root.querySelector("#globeMount");
     var graphSvg = root.querySelector("#graphSvg");
@@ -382,14 +409,51 @@
       if (sub3d) sub3d.classList.toggle("is-on", which === "globe");
       if (which === "globe") drawGlobe(globeMount, modes);
       else drawMap(map2d, modes);
+      window.setTimeout(function () {
+        if (window.__aquaMap) window.__aquaMap.invalidateSize();
+        resizeGlobe();
+      }, 120);
     }
     if (sub2d) sub2d.onclick = function () { mapView("2d"); };
     if (sub3d) sub3d.onclick = function () { mapView("globe"); };
+    var fullBtn = root.querySelector("[data-mapfull]");
+    function afterMapResize() {
+      window.setTimeout(function () {
+        if (window.__aquaMap) window.__aquaMap.invalidateSize();
+        resizeGlobe();
+      }, 80);
+    }
+    if (fullBtn) {
+      fullBtn.onclick = function () {
+        document.body.classList.toggle("map-fs");
+        fullBtn.textContent = document.body.classList.contains("map-fs") ? "Exit" : "Full";
+        afterMapResize();
+      };
+    }
+    document.onkeydown = function (ev) {
+      if (ev.key === "Escape" && document.body.classList.contains("map-fs")) {
+        document.body.classList.remove("map-fs");
+        if (fullBtn) fullBtn.textContent = "Full";
+        afterMapResize();
+      }
+    };
+    root.querySelectorAll(".mode-tab").forEach(function (btn) {
+      btn.onclick = function () {
+        var tab = btn.getAttribute("data-tab");
+        setTab(root, tab);
+        document.body.classList.toggle("is-maps-tab", tab === "maps");
+        if (tab !== "maps") {
+          document.body.classList.remove("map-fs");
+          if (fullBtn) fullBtn.textContent = "Full";
+        }
+        window.setTimeout(function () {
+          if (window.__aquaMap) window.__aquaMap.invalidateSize();
+          resizeGlobe();
+        }, 80);
+      };
+    });
     if (graphSvg) drawGraph(graphSvg, modes.graph || {});
     if (gal) drawGallery(gal, modes.gallery || []);
-    if ((modes.default_tab || "answer") === "maps") mapView(modes.map_view || "2d");
-    else {
-      mapView(modes.map_view || "2d");
-    }
+    mapView(modes.map_view || "2d");
   };
 })();

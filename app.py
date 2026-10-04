@@ -542,6 +542,109 @@ def _wiki_thumb(title: str) -> str:
     return f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}"
 
 
+def _wiki_photo(title: str) -> str:
+    slug = (title or "").replace(" ", "_")
+    try:
+        response = requests.get(
+            f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}",
+            timeout=3.5,
+            headers={"User-Agent": "AquaAsk/1.0 (OneAquaHealth hackathon)"},
+        )
+        if not response.ok:
+            return ""
+        data = response.json()
+        return str((data.get("originalimage") or data.get("thumbnail") or {}).get("source") or "")
+    except Exception:
+        return ""
+
+
+def _ddg_images(query: str, limit: int = 4) -> list[str]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        try:
+            from ddgs import DDGS
+        except Exception:
+            from duckduckgo_search import DDGS  # type: ignore
+        client = DDGS()
+        try:
+            rows = client.images(q, max_results=limit) or []
+        except TypeError:
+            rows = client.images(q, max_results=limit) or []
+        finally:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+        urls: list[str] = []
+        for item in rows:
+            url = str(item.get("image") or item.get("thumbnail") or "")
+            if url.startswith("http"):
+                urls.append(url)
+        return urls
+    except Exception:
+        LOGGER.warning("DuckDuckGo image search failed for %s", q[:80])
+        return []
+
+
+def _http_image(url: str) -> bool:
+    return str(url or "").startswith(("http://", "https://"))
+
+
+def _hydrate_gallery_photos(gallery: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not gallery:
+        return gallery
+    extras: list[str] = []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        jobs: dict[Any, tuple[str, int]] = {}
+        for i, frame in enumerate(gallery):
+            raw = str(frame.get("image") or "")
+            if raw.startswith("h2o-assets") or not _http_image(raw):
+                frame["image"] = ""
+            wiki = str(frame.get("wiki_title") or "")
+            query = str(frame.get("image_query") or frame.get("title") or "")
+            if wiki:
+                jobs[pool.submit(_wiki_photo, wiki)] = ("wiki", i)
+            if query:
+                jobs[pool.submit(_ddg_images, query, 4)] = ("ddg", i)
+        try:
+            for fut in jobs:
+                kind, i = jobs[fut]
+                try:
+                    val = fut.result(timeout=4.0)
+                except Exception:
+                    continue
+                current = str(gallery[i].get("image") or "")
+                if kind == "wiki" and val:
+                    gallery[i]["image"] = val
+                elif kind == "ddg" and isinstance(val, list) and val:
+                    if not _http_image(gallery[i].get("image")):
+                        gallery[i]["image"] = val[0]
+                    extras.extend(val)
+        except Exception:
+            LOGGER.warning("Gallery photo hydrate timed out")
+    seen = {str(frame.get("image") or "") for frame in gallery}
+    for url in extras:
+        if not _http_image(url) or url in seen:
+            continue
+        seen.add(url)
+        gallery.append(
+            {
+                "kind": "photo",
+                "title": "Urban stream",
+                "kicker": "Web photo",
+                "metric": "",
+                "unit": "",
+                "caption": "Live web image",
+                "image": url,
+                "image_query": "",
+            }
+        )
+        if len(gallery) >= 10:
+            break
+    return gallery
+
+
 def _build_modes(
     query: str,
     answer: str,
@@ -628,9 +731,9 @@ def _build_modes(
                     "metric": str(int(round(city["lat"]))),
                     "unit": "°N",
                     "caption": f"{city['country']} · {radius_km} km urban-stream radius",
-                    "image": city["image"],
-                    "image_query": f"{city['name']} urban river {city['stream']}",
-                    "wiki": _wiki_thumb(city["wiki"]),
+                    "image": "",
+                    "image_query": f"{city['name']} {city['country']} river city",
+                    "wiki_title": city["wiki"],
                 }
             )
     if not gallery:
@@ -646,8 +749,8 @@ def _build_modes(
                     "metric": "",
                     "unit": "",
                     "caption": (src or {}).get("source_origin") or "",
-                    "image": "h2o-assets/aquaask-bg-2.jpg",
-                    "image_query": title,
+                    "image": "",
+                    "image_query": f"{title} urban stream OneAquaHealth",
                 }
             )
 
@@ -690,7 +793,7 @@ def _build_modes(
             ],
         },
         "graph": graph,
-        "gallery": gallery,
+        "gallery": _hydrate_gallery_photos(gallery),
         "images": [],
     }
 
@@ -2179,6 +2282,39 @@ async def agent_bridge_js():
 @app.get("/modes.js")
 async def modes_js():
     return FileResponse(ROOT / "modes.js", media_type="text/javascript")
+
+
+@app.get("/tour.js")
+async def tour_js():
+    return FileResponse(ROOT / "tour.js", media_type="text/javascript")
+
+
+@app.get("/pwa.js")
+async def pwa_js():
+    return FileResponse(ROOT / "pwa.js", media_type="text/javascript")
+
+
+@app.get("/qrcode.min.js")
+async def qrcode_js():
+    return FileResponse(ROOT / "qrcode.min.js", media_type="text/javascript")
+
+
+@app.get("/manifest.webmanifest")
+async def web_manifest():
+    return FileResponse(ROOT / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(
+        ROOT / "sw.js",
+        media_type="text/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
+if (ROOT / "pwa").is_dir():
+    app.mount("/pwa", StaticFiles(directory=str(ROOT / "pwa")), name="pwa")
 
 
 if __name__ == "__main__":
