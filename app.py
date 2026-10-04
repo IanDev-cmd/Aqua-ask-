@@ -25,12 +25,12 @@ from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 from typing import Any, Iterable, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1722,11 +1722,14 @@ async def home_page():
 
 
 @app.get("/aquaask.html")
-async def ask_page():
-    page = ROOT / "aquaask.html"
-    if page.is_file():
-        return FileResponse(page)
-    return {"service": "aquaask-rag", "docs": "/docs", "url": PUBLIC_APP_URL, "repo": GITHUB_REPO_URL}
+async def ask_page(q: str | None = None, ai: str | None = None):
+    params: dict[str, str] = {}
+    if q:
+        params["q"] = q
+    if ai:
+        params["ai"] = ai
+    dest = "/" + (("?" + urlencode(params)) if params else "")
+    return RedirectResponse(url=dest, status_code=307)
 
 
 @app.get("/site-chrome.js")

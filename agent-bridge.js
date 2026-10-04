@@ -20,20 +20,11 @@
   }
 
   function urls() {
-    var kind = pageKind();
-    if (kind === "home") {
-      return {
-        home: "index.html",
-        globe: "aquaask.html",
-        ask: "aquaask.html",
-        mobile: "aquaask.html"
-      };
-    }
     return {
       home: "index.html",
-      globe: "aquaask.html",
-      ask: "aquaask.html",
-      mobile: "aquaask.html"
+      globe: "index.html",
+      ask: "index.html",
+      mobile: "index.html"
     };
   }
 
@@ -45,9 +36,9 @@
 
   function needsPage(action) {
     if (action === "open_home") return "home";
-    if (action === "open_ask") return "ask";
-    if (action === "open_mobile") return "mobile";
-    return "globe";
+    if (action === "open_ask") return "home";
+    if (action === "open_mobile") return "home";
+    return "home";
   }
 
   function click(selector) {
@@ -138,15 +129,17 @@
       return false;
     }
     if (action === "open_ask") {
-      var askInput = document.getElementById("askInput");
+      if (typeof window.runAquaAsk === "function") {
+        window.runAquaAsk(detail || "hello");
+        return true;
+      }
+      var askInput = document.getElementById("q") || document.getElementById("askInput");
       var form = document.getElementById("askForm");
       if (!askInput || !form) return false;
       if (detail) {
         askInput.value = detail;
         form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       }
-      var section = askSection(detail);
-      if (section) location.hash = section;
       return true;
     }
     return false;
